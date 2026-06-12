@@ -199,8 +199,10 @@ function matchSearchKeyword(change: ArchiveChange, keyword: string): boolean {
   return text.includes(keyword.toLowerCase());
 }
 
-/** Build the download file name: strip .csv extension, append _clean.csv */
+/** Build the download file name: strip .csv extension, normalize known exports, append _clean.csv */
 export function buildDownloadFileName(originalName: string): string {
-  const baseName = originalName.replace(/\.csv$/i, '');
+  const baseName = originalName
+    .replace(/\.csv$/i, '')
+    .replace(/^archive_diff_export(?=\s*(?:\(|$))/i, 'up5_csv');
   return `${baseName}_clean.csv`;
 }
