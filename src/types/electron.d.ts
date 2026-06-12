@@ -6,6 +6,13 @@ export interface ElectronAPI {
   >;
   openArchiveFileDialog: () => Promise<string | null>;
   openArchiveDirectoryDialog: () => Promise<string | null>;
+  openKkresImageDirectoryDialog?: () => Promise<string | null>;
+  openKkresImageFilesDialog?: () => Promise<string[]>;
+  getAgentServiceBaseUrl?: () => string;
+  agentServiceRequest: (request: { path: string; method?: string; body?: unknown; ownerToken?: string }) => Promise<
+    | { success: true; status: number; payload: unknown }
+    | { success: false; status: number; error: string }
+  >;
   readArchiveInput: (inputPath: string) => Promise<
     | {
       success: true;

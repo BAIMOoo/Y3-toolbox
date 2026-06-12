@@ -32,8 +32,12 @@ describe('Electron mainline static smoke coverage', () => {
     expect(main).toContain("ipcMain.handle('fs:readFile'");
     expect(main).toContain("ipcMain.handle('archive:readInput'");
     expect(main).toContain("ipcMain.handle('dialog:openArchiveDirectory'");
+    expect(main).toContain("ipcMain.handle('dialog:openKkresImageDirectory'");
+    expect(main).toContain("ipcMain.handle('dialog:openKkresImageFiles'");
 
     expect(preload).toContain("contextBridge.exposeInMainWorld('electronAPI'");
+    expect(preload).toContain("openKkresImageDirectoryDialog: () => ipcRenderer.invoke('dialog:openKkresImageDirectory')");
+    expect(preload).toContain("openKkresImageFilesDialog: () => ipcRenderer.invoke('dialog:openKkresImageFiles')");
     expect(preload).toContain("readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath)");
     expect(preload).toContain("readArchiveInput: (inputPath: string) => ipcRenderer.invoke('archive:readInput', inputPath)");
   });

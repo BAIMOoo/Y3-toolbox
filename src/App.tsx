@@ -14,6 +14,7 @@ import { StatusBar } from './components/StatusBar';
 import { EmptyState } from './components/EmptyState';
 import { filterSnapshot } from './utils/filterSnapshot';
 import { LocalArchiveViewer, type LocalArchiveInitialOpen } from './archiveViewer/LocalArchiveViewer';
+import { AgentJobCenter } from './agentJobs/AgentJobCenter';
 import { classifyOpenFilePath, classifyLocalInput, getDroppedLocalInputs, routeRequiresLocalArchive, shouldSkipRootDropRoute, type OpenFileRoute } from './utils/openFileRouting';
 import { shouldShowDiffContextToolbar } from './utils/diffUiState';
 
@@ -54,7 +55,7 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-type AppMode = 'diff' | 'local-archive';
+type AppMode = 'diff' | 'local-archive' | 'agent-jobs';
 type UiTone = 'graphite' | 'paper';
 
 const UI_TONE_STORAGE_KEY = 'archive-diff-ui-tone';
@@ -226,7 +227,7 @@ function App() {
 
   const openDiffCsvRoute = useCallback((route: Extract<OpenFileRoute, { kind: 'diff-csv' }>) => {
     if (!window.electronAPI?.readFile) {
-      setShellError('拖拽本地 CSV 需要桌面应用读取路径；也可以在当前页面点击“选择 CSV 文件”');
+      setShellError('Electron 桌面端才能通过本地路径拖拽读取 CSV；Web 模式请使用页面内上传按钮');
       return;
     }
 
@@ -240,12 +241,12 @@ function App() {
       if (result.success) {
         loadFromText(result.content, result.fileName);
       } else {
-        setShellError(`无法打开文件：${result.error}`);
+        setShellError(`无法打开文件: ${result.error}`);
       }
     }).catch((err: unknown) => {
       if (requestId !== diffOpenRequestIdRef.current) return;
       const message = err instanceof Error ? err.message : String(err);
-      setShellError(`无法打开文件：${message}`);
+      setShellError(`无法打开文件: ${message}`);
     });
   }, [loadFromText]);
 
@@ -305,7 +306,7 @@ function App() {
             <div className="app-brand-mark" aria-hidden="true">Y3</div>
             <div>
               <div className="app-brand-title">Y3工具箱</div>
-              <div className="app-brand-subtitle">存档分析工具</div>
+              <div className="app-brand-subtitle">Y3 toolbox</div>
             </div>
           </div>
           <div data-testid="mode-switch" className="app-mode-nav">
@@ -316,6 +317,7 @@ function App() {
               options={[
                 { label: '变动日志', value: 'diff' },
                 { label: '本地 Archive', value: 'local-archive' },
+                { label: 'Agent 任务', value: 'agent-jobs' },
               ]}
             />
           </div>
@@ -327,7 +329,7 @@ function App() {
               options={uiToneOptions}
             />
           </div>
-          <div className="app-window-controls" aria-label="窗口控制" title={window.electronAPI ? '窗口控制' : '当前环境不支持窗口控制'}>
+          <div className="app-window-controls" aria-label="窗口控制" title={window.electronAPI ? 'Electron window controls' : 'Electron API 未注入'}>
             <button type="button" className="app-window-button" aria-label="最小化" disabled={!window.electronAPI} onClick={() => void window.electronAPI?.minimizeWindow()}>—</button>
             <button type="button" className="app-window-button" aria-label="最大化或还原" disabled={!window.electronAPI} onClick={() => void window.electronAPI?.toggleMaximizeWindow()}>□</button>
             <button type="button" className="app-window-button app-window-button--close" aria-label="关闭" disabled={!window.electronAPI} onClick={() => void window.electronAPI?.closeWindow()}>×</button>
@@ -337,6 +339,8 @@ function App() {
         <main className={`app-content app-content--${mode}`}>
         {mode === 'local-archive' ? (
           <LocalArchiveViewer initialOpen={pendingArchiveOpen} onInitialPathConsumed={() => setPendingArchiveOpen(null)} />
+        ) : mode === 'agent-jobs' ? (
+          <AgentJobCenter />
         ) : (
           <>
         {error && (
