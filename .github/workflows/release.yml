@@ -1,0 +1,80 @@
+name: Release Windows App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag/name to publish when running manually (for example v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build and publish Windows package
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc -b --pretty false
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build Electron package
+        run: npm run build:electron -- --publish never
+
+      - name: Stage portable executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $portable = Get-ChildItem -LiteralPath dist-electron-build -Filter '*.exe' |
+            Where-Object { $_.Name -notlike '*Setup*' } |
+            Select-Object -First 1
+          if (-not $portable) {
+            throw 'Portable executable was not produced.'
+          }
+          $releaseTag = '${{ inputs.release_tag || github.ref_name }}'
+          $version = $releaseTag -replace '^v', ''
+          Copy-Item -LiteralPath $portable.FullName -Destination "release/Y3-Toolbox-$version.exe" -Force
+          Get-ChildItem -LiteralPath release | Format-Table Name,Length
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: y3-toolbox-windows-${{ inputs.release_tag || github.ref_name || 'manual' }}
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: ${{ inputs.release_tag || github.ref_name }}
+          files: release/*.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true

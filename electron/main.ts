@@ -1,0 +1,338 @@
+import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron';
+import fs from 'fs/promises';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import {
+  ARCHIVE_CONFIG_FILE_NAME,
+  ARCHIVE_FOLDER_NAME,
+  ARCHIVE_STORAGE_FILE_NAME,
+  isJsonPath,
+} from '../src/archiveViewer/archiveFileContract';
+import { findStartupOpenPath, type StartupOpenPathKind } from './startupOpenPath';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let mainWindow: BrowserWindow | null = null;
+
+async function createWindow() {
+  Menu.setApplicationMenu(null);
+
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    backgroundColor: '#090b10',
+    autoHideMenuBar: true,
+    frame: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  // 开发环境加载 Vite dev server，生产环境加载打包后的 HTML。
+  // WSL 启动 Windows electron.exe 时，VITE_DEV_SERVER_URL 有时不会进入 Electron 主进程；
+  // 因此开发模式下额外探测默认 Vite 地址，避免加载 stale dist/index.html。
+  const devServerUrl = await resolveDevServerUrl();
+  if (devServerUrl) {
+    await mainWindow.webContents.session.clearCache();
+    mainWindow.loadURL(withDevCacheBust(devServerUrl));
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
+
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const key = input.key.toLowerCase();
+    const isReloadShortcut = (input.control || input.meta) && key === 'r';
+    const isHardReloadShortcut = (input.control || input.meta) && input.shift && key === 'r';
+    const isF5 = input.key === 'F5';
+
+    if (isReloadShortcut || isHardReloadShortcut || isF5) {
+      event.preventDefault();
+      if (isHardReloadShortcut) {
+        void mainWindow?.webContents.session.clearCache().finally(() => {
+          mainWindow?.webContents.reloadIgnoringCache();
+        });
+      } else {
+        mainWindow?.webContents.reload();
+      }
+    }
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+
+// IPC: 自绘窗口控制按钮
+ipcMain.handle('window:minimize', () => {
+  mainWindow?.minimize();
+});
+
+ipcMain.handle('window:toggleMaximize', () => {
+  if (!mainWindow) return false;
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+    return false;
+  }
+  mainWindow.maximize();
+  return true;
+});
+
+ipcMain.handle('window:close', () => {
+  mainWindow?.close();
+});
+
+// IPC: 原生 CSV 文件对话框（保持现有 diff 流程兼容）
+ipcMain.handle('dialog:openFile', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'CSV Files', extensions: ['csv'] }],
+  });
+  if (result.canceled) return null;
+  return result.filePaths[0];
+});
+
+// IPC: 本地 Archive JSON 文件对话框
+ipcMain.handle('dialog:openArchiveFile', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Archive JSON Files', extensions: ['json'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled) return null;
+  return result.filePaths[0];
+});
+
+// IPC: 本地 Y3 项目文件夹对话框
+ipcMain.handle('dialog:openArchiveDirectory', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+  });
+  if (result.canceled) return null;
+  return result.filePaths[0];
+});
+
+// IPC: 读取文件内容
+ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
+  try {
+    const content = await readUtf8TextFile(filePath);
+    return { success: true, content, fileName: path.basename(filePath), filePath };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+
+// IPC: 读取本地 Archive 输入（只读，不写 archive 文件）。主进程校验 archive 边界后只返回已解析 JSON。
+ipcMain.handle('archive:readInput', async (_event, inputPath: string) => {
+  try {
+    const resolved = await resolveArchiveInput(inputPath);
+    const storageData = await readArchiveJson(resolved.archiveStoragePath, '请选择有效的 Archive JSON 文件');
+    validateArchiveStorageShape(storageData);
+
+    let archiveConfig: unknown | null = null;
+    try {
+      archiveConfig = await readArchiveJson(resolved.archiveConfigPath, 'archive.json 不是有效 JSON');
+    } catch (err) {
+      if (!isMissingFileError(err)) throw err;
+      archiveConfig = null;
+    }
+
+    return {
+      success: true,
+      inputPath,
+      projectPath: resolved.projectPath,
+      archiveStoragePath: resolved.archiveStoragePath,
+      archiveConfigPath: resolved.archiveConfigPath,
+      storageData,
+      archiveConfig,
+      title: path.basename(resolved.projectPath) || path.basename(resolved.archiveStoragePath),
+    };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+});
+
+// 处理文件关联启动
+app.on('ready', () => {
+  void createWindow();
+  void sendStartupOpenPathWhenReady(process.argv, process.platform);
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    void createWindow();
+  }
+});
+
+
+async function resolveDevServerUrl(): Promise<string | null> {
+  if (process.env.VITE_DEV_SERVER_URL) return process.env.VITE_DEV_SERVER_URL;
+  if (app.isPackaged) return null;
+
+  const fallbackUrls = [
+    // WSL 启动 Windows electron.exe 时，localhost 可能解析到不可达地址；
+    // 127.0.0.1 在 Vite 绑定 0.0.0.0 时可从 Windows 侧稳定访问。
+    'http://127.0.0.1:5173/',
+    'http://localhost:5173/',
+  ];
+
+  for (const fallbackUrl of fallbackUrls) {
+    if (await canReachUrl(fallbackUrl)) return fallbackUrl;
+  }
+
+  return null;
+}
+
+
+function withDevCacheBust(url: string): string {
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}t=${Date.now()}`;
+}
+
+function canReachUrl(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const request = http.get(url, (response) => {
+      response.resume();
+      resolve((response.statusCode ?? 0) >= 200 && (response.statusCode ?? 0) < 500);
+    });
+    request.setTimeout(800, () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.on('error', () => resolve(false));
+  });
+}
+
+
+interface ResolvedArchiveInput {
+  projectPath: string;
+  archiveStoragePath: string;
+  archiveConfigPath: string;
+}
+
+async function resolveArchiveInput(inputPath: string): Promise<ResolvedArchiveInput> {
+  if (!inputPath || typeof inputPath !== 'string') {
+    throw new Error('请选择 Y3 项目文件夹或 archive JSON 文件');
+  }
+
+  const stat = await fs.stat(inputPath);
+  if (stat.isDirectory()) {
+    const projectPath = path.basename(inputPath) === ARCHIVE_FOLDER_NAME ? path.dirname(inputPath) : inputPath;
+    const archiveStoragePath = path.join(projectPath, ARCHIVE_FOLDER_NAME, ARCHIVE_STORAGE_FILE_NAME);
+    await assertReadableJsonFile(archiveStoragePath, '请选择 Y3 项目文件夹，需包含 archive/archive_storage.json');
+    return {
+      projectPath,
+      archiveStoragePath,
+      archiveConfigPath: path.join(projectPath, ARCHIVE_FOLDER_NAME, ARCHIVE_CONFIG_FILE_NAME),
+    };
+  }
+
+  if (!stat.isFile() || !isJsonPath(inputPath)) {
+    throw new Error('本地 Archive 查看仅支持 .json 文件或 Y3 项目文件夹');
+  }
+
+  const parentPath = path.dirname(inputPath);
+  const projectPath = path.basename(parentPath) === ARCHIVE_FOLDER_NAME ? path.dirname(parentPath) : parentPath;
+  return {
+    projectPath,
+    archiveStoragePath: inputPath,
+    archiveConfigPath: path.join(projectPath, ARCHIVE_FOLDER_NAME, ARCHIVE_CONFIG_FILE_NAME),
+  };
+}
+
+async function assertReadableJsonFile(filePath: string, errorMessage: string): Promise<void> {
+  try {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile() || !isJsonPath(filePath)) throw new Error(errorMessage);
+  } catch (err) {
+    if (isMissingFileError(err)) throw new Error(errorMessage);
+    throw err;
+  }
+}
+
+async function readUtf8TextFile(filePath: string): Promise<string> {
+  const content = await fs.readFile(filePath, 'utf-8');
+  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
+}
+
+async function readArchiveJson(filePath: string, shapeErrorMessage: string): Promise<unknown> {
+  if (!isJsonPath(filePath)) throw new Error('本地 Archive 查看仅支持 .json 文件');
+  try {
+    return JSON.parse(await readUtf8TextFile(filePath)) as unknown;
+  } catch (err) {
+    if (err instanceof SyntaxError) throw new Error(`${path.basename(filePath)} 不是有效 JSON`);
+    if (isMissingFileError(err)) throw err;
+    throw new Error(shapeErrorMessage);
+  }
+}
+
+function validateArchiveStorageShape(data: unknown): void {
+  if (isFullStorageData(data) || isPlayerArchiveData(data)) return;
+  throw new Error('请选择有效的 Archive JSON 文件');
+}
+
+function isFullStorageData(data: unknown): boolean {
+  if (!isPlainObject(data)) return false;
+  return Object.values(data).some((value) => isPlainObject(value) && isPlainObject(value.archive));
+}
+
+function isPlayerArchiveData(data: unknown): boolean {
+  if (!isPlainObject(data) || Object.keys(data).length === 0) return false;
+  return Object.values(data).every((value) => (
+    isPlainObject(value)
+    && Object.prototype.hasOwnProperty.call(value, 'data_value')
+    && Object.prototype.hasOwnProperty.call(value, 'data_type')
+  ));
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isMissingFileError(err: unknown): boolean {
+  return isPlainObject(err) && err.code === 'ENOENT';
+}
+
+
+async function sendStartupOpenPathWhenReady(argv: readonly string[], platform: NodeJS.Platform): Promise<void> {
+  const filePath = await findStartupOpenPath(argv, platform, { statPath: statStartupOpenPath });
+  if (!filePath || !mainWindow) return;
+
+  // 等待渲染进程就绪后再发送文件路径；renderer 根据扩展名做模式感知路由。
+  mainWindow.webContents.once('did-finish-load', () => {
+    mainWindow?.webContents.send('file:open', filePath);
+  });
+}
+
+async function statStartupOpenPath(candidatePath: string): Promise<StartupOpenPathKind> {
+  try {
+    const stat = await fs.stat(candidatePath);
+    if (stat.isFile()) return 'file';
+    if (stat.isDirectory()) return 'directory';
+    return 'missing';
+  } catch {
+    return 'missing';
+  }
+}
