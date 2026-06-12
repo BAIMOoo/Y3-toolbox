@@ -1969,3 +1969,303 @@ button {
 .app-tone-nav .anticon {
   font-size: 14px;
 }
+
+
+/* Agent job center */
+.agent-job-center {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 20px 20px;
+  min-height: 0;
+  overflow: auto;
+  scroll-padding-top: 112px;
+  line-break: strict;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.agent-job-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 -20px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+.agent-job-topbar__title {
+  min-width: 0;
+}
+
+.agent-job-topbar__title h1 {
+  margin: 4px 0 6px;
+  color: var(--text-primary);
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.agent-job-topbar__title p {
+  margin: 0;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+.agent-job-topbar__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: fit-content;
+}
+
+.agent-job-topbar__status .ant-tag,
+.agent-job-row .ant-tag {
+  margin-inline-end: 0;
+}
+
+.agent-job-beta-alert .ant-alert-description,
+.agent-job-card .ant-typography,
+.agent-job-field small,
+.agent-job-detail p {
+  text-wrap: pretty;
+}
+
+.agent-job-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.35fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.agent-job-card {
+  border-radius: 0;
+}
+
+.agent-job-status-card {
+  min-width: 0;
+}
+
+.agent-skill-select {
+  width: 100%;
+}
+
+.agent-skill-select-popup {
+  min-width: 280px;
+  z-index: 1200;
+}
+
+.agent-skill-select-popup .ant-select-item-option-content {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.agent-job-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-primary);
+}
+
+.agent-job-field small,
+.agent-health-row small,
+.agent-job-row small {
+  color: var(--text-muted);
+}
+
+.agent-job-field--kkres-images {
+  gap: 8px;
+}
+
+.kkres-image-dropzone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.kkres-image-dropzone--dragging {
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-tertiary));
+  transform: translateY(-1px);
+}
+
+.kkres-image-dropzone__header {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.kkres-image-dropzone__header strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.kkres-image-dropzone__header span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.kkres-image-textarea-drop-target {
+  border: 1px solid transparent;
+}
+
+.kkres-image-dropzone--dragging + .kkres-image-textarea-drop-target,
+.kkres-image-textarea-drop-target:focus-within {
+  border-color: color-mix(in srgb, var(--accent-blue) 45%, transparent);
+}
+
+.agent-health-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.agent-health-row small {
+  grid-column: 1 / -1;
+}
+
+.agent-job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.agent-job-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  gap: 6px 10px;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.agent-job-row.is-active,
+.agent-job-row:hover,
+.agent-job-row:focus-visible {
+  border-color: var(--accent-blue);
+  background: color-mix(in srgb, var(--accent-blue) 8%, var(--bg-secondary));
+  outline: none;
+}
+
+.agent-job-row small {
+  grid-column: 1 / -1;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow: hidden;
+  line-height: 1.45;
+}
+
+.agent-job-detail {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+
+.agent-job-detail h3 {
+  overflow-wrap: break-word;
+}
+
+.agent-job-events {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.agent-job-events-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-job-events-header h4 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.agent-job-event-list {
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  color: var(--text-primary);
+  background: rgba(7, 10, 16, 0.72);
+  border: 1px solid var(--border);
+}
+
+.agent-job-event {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.agent-job-event:last-child {
+  border-bottom: 0;
+}
+
+.agent-job-event-time {
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.agent-job-event-message,
+.kkres-image-textarea-drop-target textarea,
+.agent-job-detail a {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.agent-job-event--stderr .agent-job-event-message,
+.agent-job-event--failed .agent-job-event-message {
+  color: var(--danger);
+}
+
+.agent-job-event--progress .agent-job-event-message {
+  color: var(--accent-blue);
+}
+
+@media (max-width: 980px) {
+  .agent-job-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-job-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .agent-job-topbar__status {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+}

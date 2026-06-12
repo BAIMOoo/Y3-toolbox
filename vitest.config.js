@@ -5,8 +5,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.{js,ts}', 'scripts/**/*.test.{js,ts}', '*.test.{js,ts}'],
-    exclude: ['node_modules/**', '.worktrees/**'],
+    include: ['src/**/*.test.{js,ts}', 'scripts/recovery/**/*.test.{js,ts}', '*.test.{js,ts}'],
+    exclude: ['node_modules/**', '.worktrees/**', '.omx/**'],
     // Use a single forks worker to avoid worker startup timeouts in WSL/Windows worktrees.
     pool: 'forks',
     maxWorkers: 1,

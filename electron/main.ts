@@ -14,6 +14,12 @@ import { findStartupOpenPath, type StartupOpenPathKind } from './startupOpenPath
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const BUILD_AGENT_RUNNER_URL = typeof __AGENT_RUNNER_URL__ === 'string' ? __AGENT_RUNNER_URL__ : '';
+
+function getConfiguredAgentRunnerUrl(): string {
+  return process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL || 'http://127.0.0.1:8790';
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 async function createWindow() {
@@ -121,6 +127,30 @@ ipcMain.handle('dialog:openArchiveDirectory', async () => {
   return result.filePaths[0];
 });
 
+// IPC: kkres 图片输入：选择一个图片文件夹
+ipcMain.handle('dialog:openKkresImageDirectory', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+  });
+  if (result.canceled) return null;
+  return result.filePaths[0];
+});
+
+// IPC: kkres 图片输入：选择一个或多个图片文件
+ipcMain.handle('dialog:openKkresImageFiles', async () => {
+  if (!mainWindow) return [];
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tga', 'psd'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled) return [];
+  return result.filePaths;
+});
+
 // IPC: 读取文件内容
 ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
   try {
@@ -135,11 +165,22 @@ ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
 });
 
 
+// IPC: Task-service JSON proxy. Packaged Electron loads from file://, so renderer fetches to
+// a local or configured HTTP service can be CORS-blocked; keep the bridge narrow and pinned.
+ipcMain.handle('agent-service:request', async (_event, request: unknown) => {
+  try {
+    const result = await proxyAgentServiceRequest(request);
+    return { success: true, ...result };
+  } catch (err: unknown) {
+    return { success: false, status: 0, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
 // IPC: 读取本地 Archive 输入（只读，不写 archive 文件）。主进程校验 archive 边界后只返回已解析 JSON。
 ipcMain.handle('archive:readInput', async (_event, inputPath: string) => {
   try {
     const resolved = await resolveArchiveInput(inputPath);
-    const storageData = await readArchiveJson(resolved.archiveStoragePath, '请选择有效的 Archive JSON 文件');
+    const storageData = await readArchiveJson(resolved.archiveStoragePath, 'Selected JSON is not an archive JSON');
     validateArchiveStorageShape(storageData);
 
     let archiveConfig: unknown | null = null;
@@ -226,6 +267,35 @@ function canReachUrl(url: string): Promise<boolean> {
 }
 
 
+interface AgentServiceProxyResponse {
+  status: number;
+  payload: unknown;
+}
+
+async function proxyAgentServiceRequest(value: unknown): Promise<AgentServiceProxyResponse> {
+  if (!isPlainObject(value) || typeof value.path !== 'string') throw new Error('Invalid task service request');
+  const method = typeof value.method === 'string' ? value.method.toUpperCase() : 'GET';
+  if (!['GET', 'POST'].includes(method)) throw new Error('Task service proxy only supports GET/POST');
+  if (!value.path.startsWith('/api/') || value.path.includes('://')) throw new Error('Task service proxy path must be a local /api/ path');
+
+  const baseUrl = getConfiguredAgentRunnerUrl();
+  const configuredBase = new URL(baseUrl);
+  if (!['http:', 'https:'].includes(configuredBase.protocol)) throw new Error('Task service proxy only supports http(s) URLs');
+  const target = new URL(value.path, configuredBase);
+  if (target.origin !== configuredBase.origin) throw new Error('Task service proxy target must stay on the configured origin');
+
+  const response = await fetch(target, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(typeof value.ownerToken === 'string' ? { 'X-Owner-Token': value.ownerToken } : {}),
+    },
+    body: method === 'POST' ? JSON.stringify(value.body ?? {}) : undefined,
+  });
+  const payload = await response.json().catch(() => ({}));
+  return { status: response.status, payload };
+}
+
 interface ResolvedArchiveInput {
   projectPath: string;
   archiveStoragePath: string;
@@ -290,7 +360,7 @@ async function readArchiveJson(filePath: string, shapeErrorMessage: string): Pro
 
 function validateArchiveStorageShape(data: unknown): void {
   if (isFullStorageData(data) || isPlayerArchiveData(data)) return;
-  throw new Error('请选择有效的 Archive JSON 文件');
+  throw new Error('Selected JSON is not an archive JSON');
 }
 
 function isFullStorageData(data: unknown): boolean {

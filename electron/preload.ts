@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 
+const BUILD_AGENT_RUNNER_URL = typeof __AGENT_RUNNER_URL__ === 'string' ? __AGENT_RUNNER_URL__ : '';
+
+function getConfiguredAgentRunnerUrl(): string {
+  return process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL || 'http://127.0.0.1:8790';
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // 打开原生文件对话框
   openFileDialog: () => ipcRenderer.invoke('dialog:openFile'),
@@ -11,6 +17,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openArchiveFileDialog: () => ipcRenderer.invoke('dialog:openArchiveFile'),
   openArchiveDirectoryDialog: () => ipcRenderer.invoke('dialog:openArchiveDirectory'),
   readArchiveInput: (inputPath: string) => ipcRenderer.invoke('archive:readInput', inputPath),
+
+  // kkres 图片输入辅助
+  openKkresImageDirectoryDialog: () => ipcRenderer.invoke('dialog:openKkresImageDirectory'),
+  openKkresImageFilesDialog: () => ipcRenderer.invoke('dialog:openKkresImageFiles'),
+
+  // Task service proxy for packaged file:// renderer builds
+  getAgentServiceBaseUrl: getConfiguredAgentRunnerUrl,
+  agentServiceRequest: (request: { path: string; method?: string; body?: unknown; ownerToken?: string }) => ipcRenderer.invoke('agent-service:request', request),
 
   // 自绘窗口控制
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),

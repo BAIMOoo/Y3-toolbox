@@ -8,7 +8,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist', 'dist-electron', 'dist-electron-build', 'dist-electron-portable', 'release-portable', 'node_modules', '.omx', '.worktrees']),
   {
-    files: ['**/*.{ts,tsx}'],
+    files: ['src/**/*.{ts,tsx}', 'electron/**/*.{ts,tsx}', '*.ts', 'scripts/recovery/**/*.{ts,tsx}', 'scripts/recovery-tool.ts'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
