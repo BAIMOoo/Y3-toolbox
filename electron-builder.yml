@@ -1,0 +1,41 @@
+appId: com.yourcompany.y3-toolbox
+productName: "y3工具箱"
+directories:
+  output: dist-electron-build
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - package-lock.json
+  - node_modules/**/*
+  - "!**/*.tsbuildinfo"
+  - "!node_modules/.cache/**/*"
+  - "!node_modules/.vite/**/*"
+  - "!node_modules/electron/dist/**/*"
+  - "!node_modules/electron-builder/**/*"
+  - "!node_modules/vite/**/*"
+  - "!node_modules/vitest/**/*"
+  - "!node_modules/typescript/**/*"
+  - "!node_modules/@types/**/*"
+  - "!node_modules/@testing-library/**/*"
+  - "!node_modules/eslint*/**/*"
+  - "!node_modules/@eslint*/**/*"
+  - "!node_modules/typescript-eslint/**/*"
+  - "!node_modules/@vitejs/**/*"
+  - "!node_modules/jsdom/**/*"
+  - "!node_modules/tsx/**/*"
+  - "!node_modules/electron/**/*"
+  - "!node_modules/vite-plugin-electron/**/*"
+  - "!node_modules/vite-plugin-electron-renderer/**/*"
+  - "!**/*.map"
+
+win:
+  target:
+    - portable
+
+fileAssociations:
+  - ext: csv
+    name: y3工具箱 CSV
+    description: "\u5B58\u6863\u53D8\u52A8\u65E5\u5FD7\u6587\u4EF6"
+    role: Viewer

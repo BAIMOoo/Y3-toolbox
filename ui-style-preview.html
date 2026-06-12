@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>存档变动 UI 极简方向预览 v2</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0b0b0b;
+      color: #e8e8e8;
+      font-family: Inter, "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .page { width: min(1440px, calc(100vw - 40px)); margin: 0 auto; padding: 28px 0 44px; }
+    header { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: end; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 28px; line-height: 1.15; letter-spacing: -0.04em; font-weight: 620; }
+    .sub { margin: 8px 0 0; color: #8d8d8d; font-size: 13px; line-height: 1.7; max-width: 760px; }
+    .rule { color: #999; font-size: 12px; border: 1px solid #272727; padding: 10px 12px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } header { grid-template-columns: 1fr; } }
+    .case { border: 1px solid #2a2a2a; background: #101010; padding: 10px; }
+    .case-title { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; padding: 2px 0 10px; }
+    .case-title h2 { margin: 0; font-size: 15px; font-weight: 560; letter-spacing: -0.02em; }
+    .case-title span { color: #858585; font-size: 12px; }
+
+    .mock {
+      height: 520px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      border-radius: var(--radius);
+    }
+    .bar {
+      height: 46px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bar);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .mark {
+      width: 20px; height: 20px;
+      border: 1px solid var(--border-2);
+      display: grid; place-items: center;
+      color: var(--muted);
+      font: 600 11px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    .brand b { display: block; font-size: 12px; font-weight: 560; letter-spacing: -0.01em; }
+    .brand small { display: block; color: var(--muted); font-size: 10px; margin-top: 1px; }
+    .tabs { display: flex; gap: 2px; border: 1px solid var(--border); padding: 2px; }
+    .tabs span { padding: 5px 8px; color: var(--muted); font-size: 10px; }
+    .tabs .on { background: var(--selected); color: var(--text); }
+    .content { height: calc(100% - 46px); display: grid; grid-template-rows: auto 1fr; gap: 10px; padding: 10px; }
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .toolbar h3 { margin: 0; font-size: 13px; font-weight: 560; letter-spacing: -0.01em; }
+    .toolbar p { margin: 3px 0 0; color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 430px; }
+    .actions { display: flex; gap: 6px; }
+    .btn { border: 1px solid var(--border-2); color: var(--text); background: transparent; padding: 5px 8px; font: 10px/1 Inter, sans-serif; }
+    .panels { min-height: 0; display: grid; grid-template-columns: .68fr 1fr 1.75fr; gap: 8px; }
+    .panel { min-width: 0; min-height: 0; overflow: hidden; border: 1px solid var(--border); background: var(--panel); }
+    .panel-head { padding: 9px 10px; border-bottom: 1px solid var(--border); background: var(--head); }
+    .panel-head b { display: block; font-size: 11px; font-weight: 560; }
+    .panel-head span { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+    .list { padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+    .row {
+      position: relative;
+      min-height: 38px;
+      display: grid;
+      align-content: center;
+      padding: 6px 8px;
+      color: var(--text);
+      border: 1px solid transparent;
+      background: transparent;
+    }
+    .row:hover { background: var(--hover); }
+    .row.active { background: var(--selected); border-color: var(--border-2); }
+    .row.active::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+    .row b { font-size: 11px; font-weight: 540; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row em { margin-top: 3px; color: var(--muted); font-style: normal; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .slot { grid-template-columns: 42px minmax(0,1fr) auto; gap: 8px; align-items: center; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; color: var(--mono); }
+    .badge { display: inline-block; border: 1px solid var(--border); color: var(--muted); padding: 2px 5px; font-size: 8px; font-weight: 560; }
+    .badge-stack { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+    .table { margin: 6px; border: 1px solid var(--border); }
+    .tr { display: grid; grid-template-columns: minmax(130px,.9fr) 74px minmax(150px,1.35fr); gap: 8px; min-height: 30px; align-items: center; padding: 5px 8px; border-bottom: 1px solid var(--line); font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .tr:first-child { color: var(--muted); font: 600 9px/1.4 Inter, sans-serif; letter-spacing: .05em; text-transform: uppercase; background: var(--head); }
+    .tr:last-child { border-bottom: 0; }
+    .tr span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .field { color: var(--field); font-weight: 560; }
+
+    .dark-soft {
+      --bg:#0f1011; --bar:#111213; --surface:#121314; --panel:#111213; --head:#141516;
+      --text:#e6e6e6; --muted:#858585; --border:#2a2b2c; --border-2:#3a3b3c; --line:#242526;
+      --selected:#1a1b1c; --hover:#161718; --accent:#9a9a9a; --mono:#b5b5b5; --field:#d0d0d0; --radius:0;
+    }
+    .black-line {
+      --bg:#000; --bar:#000; --surface:#000; --panel:#000; --head:#000;
+      --text:#f0f0f0; --muted:#777; --border:#222; --border-2:#555; --line:#171717;
+      --selected:#111; --hover:#090909; --accent:#fff; --mono:#c8c8c8; --field:#fff; --radius:0;
+    }
+    .light-swiss {
+      --bg:#f7f7f7; --bar:#fff; --surface:#fff; --panel:#fff; --head:#fafafa;
+      --text:#171717; --muted:#747474; --border:#dedede; --border-2:#bdbdbd; --line:#eeeeee;
+      --selected:#eeeeee; --hover:#f2f2f2; --accent:#111; --mono:#444; --field:#111; --radius:0;
+    }
+    .paper {
+      --bg:#fbfaf6; --bar:#fbfaf6; --surface:#fbfaf6; --panel:#fbfaf6; --head:#f2f0ea;
+      --text:#1f1f1d; --muted:#6f6b62; --border:#d8d3c8; --border-2:#aaa395; --line:#e8e4da;
+      --selected:#eee9dd; --hover:#f4f0e8; --accent:#1f1f1d; --mono:#4d4941; --field:#1f1f1d; --radius:0;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <h1>更极简的 UI 方向</h1>
+        <p class="sub">这版刻意去掉“高级感装饰”：无渐变、无阴影、无发光、几乎无圆角，只保留排版、边框、灰阶和必要选中状态。</p>
+      </div>
+      <div class="rule">判断标准：如果仍觉得花，就继续减少边框、按钮、徽标和标题。</div>
+    </header>
+
+    <section class="grid">
+      <article class="case">
+        <div class="case-title"><h2>1. 深灰克制工具</h2><span>推荐，最适合当前项目</span></div>
+        <div class="mock dark-soft"></div>
+      </article>
+      <article class="case">
+        <div class="case-title"><h2>2. 纯黑线框</h2><span>最冷静，但会更硬</span></div>
+        <div class="mock black-line"></div>
+      </article>
+      <article class="case">
+        <div class="case-title"><h2>3. 浅色瑞士极简</h2><span>白灰黑，像文档工具</span></div>
+        <div class="mock light-swiss"></div>
+      </article>
+      <article class="case">
+        <div class="case-title"><h2>4. 纸面 / E-ink</h2><span>温和、低压迫、慢工具感</span></div>
+        <div class="mock paper"></div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const html = `
+      <div class="bar">
+        <div class="brand">
+          <div class="mark">A</div>
+          <div><b>存档变动</b><small>Archive Inspector</small></div>
+        </div>
+        <div class="tabs"><span>CSV Diff</span><span class="on">Archive</span></div>
+      </div>
+      <div class="content">
+        <div class="toolbar">
+          <div><h3>Project Archive</h3><p>C:/Y3/projects/demo/archive.json</p></div>
+          <div class="actions"><button class="btn">Open JSON</button><button class="btn">Open Folder</button></div>
+        </div>
+        <div class="panels">
+          <section class="panel">
+            <div class="panel-head"><b>Players</b><span>3 sources</span></div>
+            <div class="list">
+              <div class="row active"><b>Player_001</b><em>128 slots</em></div>
+              <div class="row"><b>Player_002</b><em>94 slots</em></div>
+              <div class="row"><b>System</b><em>42 slots</em></div>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><b>Slots</b><span>128 visible</span></div>
+            <div class="list">
+              <div class="row slot active"><span class="mono">#1024</span><span><b>hero_inventory</b><em>sword, potion, key...</em></span><span class="badge-stack"><i class="badge">table</i><i class="badge">player</i></span></div>
+              <div class="row slot"><span class="mono">#1025</span><span><b>quest_state</b><em>chapter_03 active</em></span><span class="badge-stack"><i class="badge">dict</i><i class="badge">player</i></span></div>
+              <div class="row slot"><span class="mono">#1030</span><span><b>currency</b><em>gold: 12840</em></span><span class="badge-stack"><i class="badge">num</i><i class="badge">player</i></span></div>
+              <div class="row slot"><span class="mono">#1044</span><span><b>unlocked_area</b><em>forest, dock, tower</em></span><span class="badge-stack"><i class="badge">list</i><i class="badge">default</i></span></div>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><b>Slot 1024</b><span>hero_inventory · table</span></div>
+            <div class="table">
+              <div class="tr"><span>字段</span><span>类型</span><span>值</span></div>
+              <div class="tr"><span class="field">items.weapon.id</span><span>string</span><span>blade_silver_01</span></div>
+              <div class="tr"><span class="field">items.weapon.level</span><span>number</span><span>12</span></div>
+              <div class="tr"><span class="field">items.consumable[0]</span><span>string</span><span>potion_hp_large</span></div>
+              <div class="tr"><span class="field">items.key.quest</span><span>bool</span><span>true</span></div>
+              <div class="tr"><span class="field">meta.updatedAt</span><span>number</span><span>1729481220</span></div>
+            </div>
+          </section>
+        </div>
+      </div>`;
+    document.querySelectorAll('.mock').forEach(el => { el.innerHTML = html; });
+  </script>
+</body>
+</html>

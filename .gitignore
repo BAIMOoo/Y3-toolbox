@@ -1,0 +1,51 @@
+.worktrees/
+__pycache__/
+.superpowers/
+.omc/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+dist-electron/
+dist-electron-build/
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local mail credentials
+.local-tools/mail/config/msmtprc
+.local-tools/mail/config/muttrc
+.local-tools/mail/secrets/
+
+# Generated local analysis/export artifacts
+analysis-*/
+archive-changes/
+tmp/
+logs.txt
+NUL
+
+# Local tool installs and packaged releases
+.local-tools/
+dist-electron-portable/
+release-portable/
+
+# Local UI review screenshots
+/1.png
