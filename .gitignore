@@ -49,3 +49,7 @@ release-portable/
 
 # Local UI review screenshots
 /1.png
+
+# Local/private docs
+/docs/logtail.md
+/docs/public-backend-release.md
