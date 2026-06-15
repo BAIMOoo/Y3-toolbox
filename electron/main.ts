@@ -245,6 +245,10 @@ async function resolveDevServerUrl(): Promise<string | null> {
   if (app.isPackaged) return null;
 
   const fallbackUrls = [
+    // Prefer the isolated dev frontend port so public-runtime Vite on 5173 does not
+    // accidentally satisfy local Electron fallback probing.
+    'http://127.0.0.1:5174/',
+    'http://localhost:5174/',
     // WSL 启动 Windows electron.exe 时，localhost 可能解析到不可达地址；
     // 127.0.0.1 在 Vite 绑定 0.0.0.0 时可从 Windows 侧稳定访问。
     'http://127.0.0.1:5173/',
