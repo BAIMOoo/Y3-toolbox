@@ -149,7 +149,11 @@ export function AgentJobCenter() {
     setLoading(true);
     setError(null);
     try {
-      const params = await prepareAgentSubmitParams(selectedSkill.id, applyAgentParamDefaults(selectedSkill.id, formValues) as AgentSubmitRequest['params']);
+      const params = await prepareAgentSubmitParams(
+        selectedSkill.id,
+        applyAgentParamDefaults(selectedSkill.id, formValues) as AgentSubmitRequest['params'],
+        (images) => setFormValues((current) => ({ ...current, images })),
+      );
       const validationErrors = validateAgentParams(selectedSkill.id, params);
       if (validationErrors.length > 0) {
         setError(validationErrors.join('；'));
@@ -388,7 +392,11 @@ function KkresImagePathField({
 }
 
 
-async function prepareAgentSubmitParams(skillId: AgentSkillDefinition['id'], params: AgentSubmitRequest['params']): Promise<AgentSubmitRequest['params']> {
+async function prepareAgentSubmitParams(
+  skillId: AgentSkillDefinition['id'],
+  params: AgentSubmitRequest['params'],
+  onImagesPrepared?: (images: string) => void,
+): Promise<AgentSubmitRequest['params']> {
   if (skillId !== 'export-kkres-image') return params;
   const imageLines = splitLineValues(params.images);
   const preparedLines: string[] = [];
@@ -402,10 +410,16 @@ async function prepareAgentSubmitParams(skillId: AgentSkillDefinition['id'], par
   if (!stagingApi) {
     throw new Error('本机图片路径需要桌面版先上传暂存；Web 模式请填写 staging: 或 public-input/ 图片标识。');
   }
+  message.loading({ content: `正在上传暂存 ${localInputs.length} 个 kkres 本机输入…`, key: 'kkres-stage' });
   const staged = await stagingApi({ inputs: localInputs, ownerToken: getAgentOwnerToken() });
-  if (!staged.success) throw new Error(staged.error);
-  message.success(`已上传暂存 ${staged.identifiers.length} 张 kkres 图片`);
-  return { ...params, images: [...preparedLines, ...staged.identifiers].join('\n') };
+  if (!staged.success) {
+    message.destroy('kkres-stage');
+    throw new Error(staged.error);
+  }
+  const images = [...preparedLines, ...staged.identifiers].join('\n');
+  onImagesPrepared?.(images);
+  message.success({ content: `已上传暂存 ${staged.identifiers.length} 张 kkres 图片`, key: 'kkres-stage' });
+  return { ...params, images };
 }
 
 function splitLineValues(value: unknown): string[] {
