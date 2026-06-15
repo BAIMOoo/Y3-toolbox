@@ -81,6 +81,20 @@ function firstZipEntryText(buffer: Buffer): string {
   throw new Error(`unsupported zip method ${method}`);
 }
 
+
+async function createHealthyY3SourceRoot(root: string): Promise<string> {
+  const sourceRoot = path.join(root, 'Y3map', 'src');
+  const engineRoot = path.join(sourceRoot, 'Server', 'server', 'engine');
+  const scriptPython = path.join(sourceRoot, 'Package', 'Script', 'Python');
+  await fs.mkdir(path.join(engineRoot, 'dm', 'commons', 'helper'), { recursive: true });
+  await fs.writeFile(path.join(engineRoot, 'dm', 'commons', 'helper', 'digest_helper.py'), '# helper');
+  await fs.mkdir(path.join(sourceRoot, 'Engine', 'Binaries', 'Win64'), { recursive: true });
+  await fs.writeFile(path.join(sourceRoot, 'Engine', 'Binaries', 'Win64', 'PythonMain_x64h.exe'), 'stub');
+  await fs.mkdir(path.dirname(scriptPython), { recursive: true });
+  await fs.symlink(engineRoot, scriptPython, process.platform === 'win32' ? 'junction' : 'dir');
+  return sourceRoot;
+}
+
 function config(root: string, overrides: Partial<RunnerConfig> = {}): RunnerConfig {
   return {
     host: '127.0.0.1',
@@ -239,7 +253,8 @@ describe('AgentJobStore', () => {
       "fs.writeFileSync(zip, zipBuffer('summary.csv','mock zip'));",
       "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'archive done',artifacts:[{path:csv},{path:zip}],verification:['zip checked'],warnings:[]}));",
     ].join('');
-    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const sourceRoot = await createHealthyY3SourceRoot(root);
+    const store = new AgentJobStore(config(root, { mockMode: false, mismatchSourceRoot: sourceRoot, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
     const submitted = await store.submit('fetch-archive-changes', {
       players: '30144230',
       mapId: '204521',
@@ -679,7 +694,8 @@ describe('AgentJobStore', () => {
       "fs.writeFileSync(zip, zipBuffer([['summary.txt', 'ok'], ['玩家/苍金陵.json', JSON.stringify({ok:true})]]));",
       "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'utf8 zip decoded_digest=true',artifacts:[{path:zip}],verification:['zip checked'],warnings:[]}));",
     ].join('');
-    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const sourceRoot = await createHealthyY3SourceRoot(root);
+    const store = new AgentJobStore(config(root, { mockMode: false, mismatchSourceRoot: sourceRoot, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
     const submitted = await store.submit('fetch-mismatch-logs', { mapId: '10204416', days: 7 }, OWNER_TOKEN);
     const done = await waitForTerminal(store, submitted.id);
 

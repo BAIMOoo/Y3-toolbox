@@ -190,14 +190,25 @@ describe('agent runner skill contracts', () => {
     })).resolves.toContain('export-kkres-image agent result did not produce KKExport.kkres');
   });
 
-  it('renders kkres prompts without client-supplied runtime, repo, or max-size parameters', async () => {
+  it('renders kkres prompts with server-owned runtime automation and without client-supplied runtime fields', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-contract-'));
     const outputDir = path.join(root, 'jobs', 'job-kkres');
+    const runtimeRoot = 'I:\\map\\src';
+    const repoRoot = 'I:\\map\\src\\Server\\server\\engine\\dm';
+    const projectPath = 'I:\\map\\src\\LocalData\\ProjectName001';
     const execution = await buildAgentExecution('export-kkres-image', {
       images: 'C:\\tmp\\a.png',
-    }, outputDir, config(root));
+    }, outputDir, config(root, { kkresRuntimeRoot: runtimeRoot, kkresRepoRoot: repoRoot, kkresProjectPath: projectPath }));
 
     expect(execution.prompt).toContain('Skill id: export-kkres-image');
+    expect(execution.prompt).toContain(`Server-owned Y3 editor runtime root: ${runtimeRoot}`);
+    expect(execution.prompt).toContain(`Server-owned Y3 dm repo root: ${repoRoot}`);
+    expect(execution.prompt).toContain(`Server-owned Y3 project path: ${projectPath}`);
+    expect(execution.prompt).toContain('--run-editor-console --auto-start-runtime');
+    expect(execution.prompt).toContain('--copy-kkres-to <job output directory>');
+    expect(execution.prompt).toContain('--project-path <project path>');
+    expect(execution.prompt).toContain('Do not stop after merely checking existing telnet ports');
+    expect(execution.prompt).toContain('ProjectName001');
     expect(execution.prompt).toContain('4096x4096');
     expect(execution.prompt).toContain('limit_image_size');
     expect(execution.prompt).toContain('1920x1080');

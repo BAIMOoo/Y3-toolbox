@@ -19,7 +19,7 @@ function ownerHeaders(ownerToken = OWNER_A) {
   return { 'Content-Type': 'application/json', 'X-Owner-Token': ownerToken };
 }
 
-async function start(root: string) {
+async function start(root: string, env: NodeJS.ProcessEnv = {}) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const server = createAgentRunnerServer(createDefaultConfig({
       AGENT_RUNNER_HOST: '127.0.0.1',
@@ -28,6 +28,7 @@ async function start(root: string) {
       AGENT_RUNNER_PROJECT_ROOT: process.cwd(),
       AGENT_RUNNER_MOCK: '1',
       AGENT_PROVIDER_NAME: 'mock-agent',
+      ...env,
     }));
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
     const address = server.address();
@@ -120,8 +121,34 @@ describe('agent runner HTTP API', () => {
     const allowed = await fetch(`${base}/api/skills`, { headers: { Origin: 'http://127.0.0.1:5173' } });
     expect(allowed.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:5173');
     expect(allowed.headers.get('access-control-allow-headers')).toContain('X-Owner-Token');
+    expect(allowed.headers.get('access-control-allow-headers')).toContain('X-Filename');
     const denied = await fetch(`${base}/api/skills`, { headers: { Origin: 'http://evil.example' } });
     expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('stages kkres image uploads under the configured public input root', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-server-staging-'));
+    const publicRoot = path.join(root, 'public-images');
+    const base = await start(root, { AGENT_KKRES_PUBLIC_INPUT_ROOT: publicRoot });
+
+    const response = await fetch(`${base}/api/kkres/staging`, {
+      method: 'POST',
+      headers: { ...ownerHeaders(), 'Content-Type': 'image/png', 'X-Filename': encodeURIComponent('sample image.png') },
+      body: Buffer.from('png-bytes'),
+    });
+
+    expect(response.status).toBe(201);
+    const payload = await response.json() as { identifier: string };
+    expect(payload.identifier).toMatch(/^staging:\d+-[-0-9a-f]+-sample_image\.png$/);
+    const stagedPath = path.join(publicRoot, 'staging', payload.identifier.slice('staging:'.length));
+    await expect(fs.readFile(stagedPath, 'utf8')).resolves.toBe('png-bytes');
+
+    const rejected = await fetch(`${base}/api/kkres/staging`, {
+      method: 'POST',
+      headers: { ...ownerHeaders(), 'Content-Type': 'application/octet-stream', 'X-Filename': 'bad.exe' },
+      body: Buffer.from('nope'),
+    });
+    expect(rejected.status).toBe(400);
   });
 
   it('defaults to loopback and flags LAN bind only by explicit config', () => {

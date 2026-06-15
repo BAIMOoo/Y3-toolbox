@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { TRUSTED_RUNNER_WARNING } from '../../src/agentJobs/catalog';
 import type { AgentSubmitRequest } from '../../src/agentJobs/types';
 import { AgentJobStore } from './jobStore';
@@ -10,6 +11,8 @@ import type { RunnerConfig } from './contracts';
 const CODEX_BIN_RELATIVE_PATH = ['node_modules', '@openai', 'codex', 'bin', 'codex.js'];
 const DEFAULT_CODEX_ARGS_TEMPLATE = ['exec', '--cd', '{projectRoot}', '--dangerously-bypass-approvals-and-sandbox'];
 const DEFAULT_AGENT_HEALTH_ARGS_TEMPLATE = ['--version'];
+const KKRES_STAGING_MAX_BYTES = 64 * 1024 * 1024;
+const KKRES_STAGING_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp']);
 
 export function splitArgsTemplate(value: string | undefined, fallback: string[]): string[] {
   if (!value?.trim()) return fallback;
@@ -104,6 +107,7 @@ export function createDefaultConfig(env: NodeJS.ProcessEnv = process.env): Runne
     mismatchSourceRoot: env.AGENT_MISMATCH_SOURCE_ROOT || env.Y3_SOURCE_ROOT,
     kkresRuntimeRoot: env.AGENT_KKRES_RUNTIME_ROOT,
     kkresRepoRoot: env.AGENT_KKRES_REPO_ROOT,
+    kkresProjectPath: env.AGENT_KKRES_PROJECT_PATH,
     kkresPublicInputRoot: env.AGENT_KKRES_PUBLIC_INPUT_ROOT,
     agentSkillRoot: env.AGENT_SKILL_ROOT,
   };
@@ -129,6 +133,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, store: A
   if (req.method === 'GET' && url.pathname === '/api/diagnostics') {
     if (!isLocalRequest(req)) return sendJson(res, 404, { error: 'Not found' });
     return sendJson(res, 200, await store.diagnostics());
+  }
+  if (req.method === 'POST' && url.pathname === '/api/kkres/staging') {
+    if (!isLocalRequest(req)) return sendJson(res, 404, { error: 'Not found' });
+    try {
+      const payload = await stageKkresUpload(req, config, readOwnerToken(req, url));
+      return sendJson(res, 201, payload);
+    } catch (err) {
+      return sendJson(res, 400, { error: publicError(err instanceof Error ? err.message : String(err)) });
+    }
   }
   if (req.method === 'GET' && url.pathname === '/api/jobs') {
     await store.ready();
@@ -204,6 +217,69 @@ function readOwnerToken(req: IncomingMessage, url: URL, bodyValue?: unknown): st
   return value;
 }
 
+async function stageKkresUpload(req: IncomingMessage, config: RunnerConfig, ownerToken: string): Promise<{ identifier: string }> {
+  if (!config.kkresPublicInputRoot?.trim()) throw new Error('KKRes public image input root is not configured');
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(ownerToken)) throw new Error('Owner token is required');
+  const contentLength = Number(firstHeader(req.headers['content-length']));
+  if (Number.isFinite(contentLength) && contentLength > KKRES_STAGING_MAX_BYTES) throw new Error('KKRes staging image is too large');
+
+  const originalName = decodeHeaderFilename(firstHeader(req.headers['x-filename'])) || 'image';
+  const extension = path.extname(originalName).toLowerCase();
+  if (!KKRES_STAGING_EXTENSIONS.has(extension)) throw new Error('KKRes staging image must be png/jpg/webp/bmp');
+
+  const stagingDir = path.join(config.kkresPublicInputRoot, 'staging');
+  await fs.promises.mkdir(stagingDir, { recursive: true });
+  const safeStem = path.basename(originalName, extension).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 64) || 'image';
+  const safeName = `${Date.now()}-${randomUUID()}-${safeStem}${extension}`;
+  const targetPath = path.join(stagingDir, safeName);
+  await writeRequestBodyToFile(req, targetPath, KKRES_STAGING_MAX_BYTES);
+  return { identifier: `staging:${safeName}` };
+}
+
+function decodeHeaderFilename(value: string): string {
+  if (!value) return '';
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function writeRequestBodyToFile(req: IncomingMessage, targetPath: string, maxBytes: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let bytes = 0;
+    let settled = false;
+    const output = fs.createWriteStream(targetPath, { flags: 'wx' });
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      req.destroy();
+      output.destroy();
+      fs.promises.rm(targetPath, { force: true }).finally(() => reject(err));
+    };
+    output.on('error', fail);
+    req.on('error', fail);
+    req.on('data', (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > maxBytes) return fail(new Error('KKRes staging image is too large'));
+      if (!output.write(chunk)) req.pause();
+    });
+    output.on('drain', () => req.resume());
+    req.on('end', () => {
+      if (settled) return;
+      output.end(() => {
+        if (settled) return;
+        settled = true;
+        if (bytes <= 0) {
+          fs.promises.rm(targetPath, { force: true }).finally(() => reject(new Error('KKRes staging image is empty')));
+          return;
+        }
+        resolve();
+      });
+    });
+  });
+}
+
 function publicError(message: string): string {
   const sanitized = redactPublicText(message);
   if (/Unknown skill|Owner token|required|Invalid|must|Service busy|maintenance|not ready|too long|too many|between|throttled|local path/i.test(sanitized)) return sanitized;
@@ -258,7 +334,7 @@ function applyCors(req: IncomingMessage, res: ServerResponse): void {
   if (!origin || !isAllowedLocalOrigin(origin)) return;
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Owner-Token');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Owner-Token, X-Filename');
 }
 
 function isAllowedLocalOrigin(origin: string): boolean {

@@ -3,7 +3,9 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 const BUILD_AGENT_RUNNER_URL = typeof __AGENT_RUNNER_URL__ === 'string' ? __AGENT_RUNNER_URL__ : '';
 
 function getConfiguredAgentRunnerUrl(): string {
-  return process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL || 'http://127.0.0.1:8790';
+  const configuredUrl = process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL;
+  if (configuredUrl) return configuredUrl;
+  return process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:8791' : 'http://127.0.0.1:8790';
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {

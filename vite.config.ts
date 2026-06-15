@@ -26,7 +26,7 @@ const agentRunnerUrl = process.env.VITE_AGENT_RUNNER_URL || ''
 const agentServiceProxyTarget = process.env.AGENT_SERVICE_PROXY_TARGET
   || process.env.AGENT_RUNNER_PROXY_TARGET
   || process.env.AGENT_RUNNER_URL
-  || 'http://127.0.0.1:8790'
+  || 'http://127.0.0.1:8791'
 
 export default defineConfig({
   define: {

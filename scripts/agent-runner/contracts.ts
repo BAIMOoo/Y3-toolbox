@@ -26,6 +26,7 @@ export interface RunnerConfig {
   mismatchSourceRoot?: string;
   kkresRuntimeRoot?: string;
   kkresRepoRoot?: string;
+  kkresProjectPath?: string;
   kkresPublicInputRoot?: string;
   agentSkillRoot?: string;
 }
@@ -450,6 +451,9 @@ function mismatchPrompt(params: Record<string, unknown>, outputDir: string, conf
 }
 
 function kkresPrompt(params: Record<string, unknown>, outputDir: string, config: RunnerConfig): string {
+  const runtimeRoot = config.kkresRuntimeRoot || '';
+  const repoRoot = config.kkresRepoRoot || '';
+  const projectPath = config.kkresProjectPath || '';
   return baseAgentPrompt({
     skillId: 'export-kkres-image',
     skillPath: externalSkillPath(config, 'export-kkres-image', 'SKILL.md'),
@@ -459,6 +463,12 @@ function kkresPrompt(params: Record<string, unknown>, outputDir: string, config:
       `KKRes specific requirements:`,
       `- Follow the skill's editor-runtime workflow, including ASCII staging/snippet handling when needed.`,
       `- Runtime and dm repo roots are server-owned configuration; do not ask the client/user to fill root directory fields.`,
+      `- Server-owned Y3 editor runtime root: ${runtimeRoot || '(not configured)'}.`,
+      `- Server-owned Y3 dm repo root: ${repoRoot || '(not configured)'}.`,
+      `- Server-owned Y3 project path: ${projectPath || '(auto: <runtime root>\\LocalData\\ProjectName001)'}.`,
+      `- When runtime/repo roots are configured, first attempt real export with the skill helper using: --run-editor-console --auto-start-runtime --runtime-root <runtime root> --repo-root <dm repo root> --project-path <project path> --export-dir <job output directory> --copy-kkres-to <job output directory>.`,
+      `- Do not stop after merely checking existing telnet ports; --auto-start-runtime is expected to launch Game_x64h.exe with a console when no editor console is already listening.`,
+      `- Always pass --project-path when a server-owned project path is configured. If it is not configured, let the helper infer <runtime root>\\LocalData\\ProjectName001 and create/open that scratch project as needed; do not run imports with no loaded project.`,
       `- The maximum supported image size is 4096x4096; tell the client/user this limit instead of asking them to configure it.`,
       `- Before import, verify ordinary editor_icon import will not downscale by default: CustomResUtils.limit_image_size must default max_width/max_height to None, or the generated editor snippet must monkey patch that old 1920x1080 default in the running editor process.`,
       `- The result is only successful when KKExport.kkres or another .kkres artifact exists in the job output directory and has size > 0.`,
@@ -553,12 +563,14 @@ export const AGENT_SKILL_CONTRACTS: Record<AgentSkillId, AgentSkillContract> = {
       const helper = externalSkillPath(config, 'export-kkres-image', 'scripts', 'prepare_export_kkres_image.py');
       const runtimeRoot = config.kkresRuntimeRoot || '';
       const repoRoot = config.kkresRepoRoot || '';
+      const projectPath = config.kkresProjectPath || '';
       details.push(await exists(skill) ? 'skill instructions found' : `Missing skill instructions: ${skill}`);
       details.push(await exists(helper) ? 'kkres helper script found for agent workflow' : `Missing kkres helper script: ${helper}`);
       details.push(...await checkPowerShell());
       details.push(...await checkWindowsPython());
       details.push(await hasKkresRuntime(runtimeRoot) ? `Y3 editor runtime found: ${runtimeRoot}` : 'Missing kkres Y3 editor runtime; set AGENT_KKRES_RUNTIME_ROOT');
       details.push(await hasKkresRepo(repoRoot) ? `Y3 dm repo found: ${repoRoot}` : 'Missing kkres dm repo root; set AGENT_KKRES_REPO_ROOT');
+      details.push(projectPath ? `Y3 kkres project path configured: ${projectPath}` : 'Y3 kkres project path not configured; helper will use/create <runtime root>\\LocalData\\ProjectName001');
       const ready = details.every((detail) => !detail.startsWith('Missing') && !detail.includes('unavailable'));
       return { ready, details };
     },
