@@ -46,6 +46,8 @@ jobs:
 
       - name: Build Electron package
         run: npm run build:electron -- --publish never
+        env:
+          VITE_AGENT_RUNNER_URL: https://y3toolbox.b4im.com
 
       - name: Stage portable executable
         shell: pwsh

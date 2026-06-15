@@ -1,7 +1,7 @@
 {
   "name": "y3-toolbox",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "y3工具箱 for Y3 engine archive analysis workflows",
   "author": "BAIM",
   "type": "module",
