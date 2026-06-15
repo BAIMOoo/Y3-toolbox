@@ -18,7 +18,9 @@ const __dirname = path.dirname(__filename);
 const BUILD_AGENT_RUNNER_URL = typeof __AGENT_RUNNER_URL__ === 'string' ? __AGENT_RUNNER_URL__ : '';
 
 function getConfiguredAgentRunnerUrl(): string {
-  return process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL || 'http://127.0.0.1:8790';
+  const configuredUrl = process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL;
+  if (configuredUrl) return configuredUrl;
+  return app.isPackaged ? 'http://127.0.0.1:8790' : 'http://127.0.0.1:8791';
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -245,14 +247,10 @@ async function resolveDevServerUrl(): Promise<string | null> {
   if (app.isPackaged) return null;
 
   const fallbackUrls = [
-    // Prefer the isolated dev frontend port so public-runtime Vite on 5173 does not
-    // accidentally satisfy local Electron fallback probing.
+    // Only probe the isolated dev frontend port. Port 5173 may belong to the
+    // public-runtime service and can otherwise make local Electron load stale UI.
     'http://127.0.0.1:5174/',
     'http://localhost:5174/',
-    // WSL 启动 Windows electron.exe 时，localhost 可能解析到不可达地址；
-    // 127.0.0.1 在 Vite 绑定 0.0.0.0 时可从 Windows 侧稳定访问。
-    'http://127.0.0.1:5173/',
-    'http://localhost:5173/',
   ];
 
   for (const fallbackUrl of fallbackUrls) {
