@@ -14,6 +14,7 @@ export default defineConfig({
   base: './',
   server: {
     host: '0.0.0.0',
+    allowedHosts: ['y3toolbox.b4im.com'],
     proxy: {
       '/api': {
         target: agentServiceProxyTarget,
