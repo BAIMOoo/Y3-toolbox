@@ -53,7 +53,9 @@ describe('AgentJobCenter beta warning copy contract', () => {
     expect(source).toContain('KkresImagePathField');
     expect(source).toContain('选择图片文件夹');
     expect(source).toContain('选择图片文件');
-    expect(source).toContain('填写上传/暂存图片标识');
+    expect(source).toContain('选择本机图片并自动暂存');
+    expect(source).toContain('stageKkresImageInputs');
+    expect(source).toContain('prepareAgentSubmitParams');
     expect(source).toContain('mergeLineValues');
     expect(source).toContain('getDroppedKkresImagePaths');
     expect(source).toContain('kkres-image-textarea-drop-target');

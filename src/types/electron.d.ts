@@ -8,6 +8,10 @@ export interface ElectronAPI {
   openArchiveDirectoryDialog: () => Promise<string | null>;
   openKkresImageDirectoryDialog?: () => Promise<string | null>;
   openKkresImageFilesDialog?: () => Promise<string[]>;
+  stageKkresImageInputs?: (request: { inputs: string[]; ownerToken: string }) => Promise<
+    | { success: true; identifiers: string[] }
+    | { success: false; error: string }
+  >;
   getAgentServiceBaseUrl?: () => string;
   agentServiceRequest: (request: { path: string; method?: string; body?: unknown; ownerToken?: string }) => Promise<
     | { success: true; status: number; payload: unknown }

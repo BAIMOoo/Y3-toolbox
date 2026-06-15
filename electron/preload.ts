@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // kkres 图片输入辅助
   openKkresImageDirectoryDialog: () => ipcRenderer.invoke('dialog:openKkresImageDirectory'),
   openKkresImageFilesDialog: () => ipcRenderer.invoke('dialog:openKkresImageFiles'),
+  stageKkresImageInputs: (request: { inputs: string[]; ownerToken: string }) => ipcRenderer.invoke('kkres:stageImageInputs', request),
 
   // Task service proxy for packaged file:// renderer builds
   getAgentServiceBaseUrl: getConfiguredAgentRunnerUrl,

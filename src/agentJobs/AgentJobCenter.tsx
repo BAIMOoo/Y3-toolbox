@@ -146,15 +146,15 @@ export function AgentJobCenter() {
 
   const submit = async () => {
     if (!selectedSkill) return;
-    const params = applyAgentParamDefaults(selectedSkill.id, formValues) as AgentSubmitRequest['params'];
-    const validationErrors = validateAgentParams(selectedSkill.id, params);
-    if (validationErrors.length > 0) {
-      setError(validationErrors.join('；'));
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
+      const params = await prepareAgentSubmitParams(selectedSkill.id, applyAgentParamDefaults(selectedSkill.id, formValues) as AgentSubmitRequest['params']);
+      const validationErrors = validateAgentParams(selectedSkill.id, params);
+      if (validationErrors.length > 0) {
+        setError(validationErrors.join('；'));
+        return;
+      }
       const payload = await submitAgentJob({ skillId: selectedSkill.id, params });
       setJobs((current) => [payload.job, ...current.filter((job) => job.id !== payload.job.id)]);
       setActiveJobId(payload.job.id);
@@ -356,14 +356,14 @@ function KkresImagePathField({
         onDragLeave={() => setIsDragging(false)}
       >
         <div className="kkres-image-dropzone__header">
-          <strong>{isDragging ? '释放后添加路径' : '填写上传/暂存图片标识'}</strong>
-          <span>任务服务不接受任意本机路径。</span>
+          <strong>{isDragging ? '释放后添加路径' : '选择本机图片并自动暂存'}</strong>
+          <span>提交时会先上传本机图片，再把 staging: 标识发送给任务服务。</span>
         </div>
         <Space wrap>
           <Button type="default" onClick={onOpenDirectory} disabled={!canUseNativePicker}>选择图片文件夹</Button>
           <Button onClick={onOpenFiles} disabled={!canUseNativePicker}>选择图片文件</Button>
         </Space>
-        {!canUseNativePicker && <small>请使用上传后返回的 staging: 或 public-input/ 图片标识。</small>}
+        {!canUseNativePicker && <small>Web 模式请使用上传后返回的 staging: 或 public-input/ 图片标识。</small>}
       </div>
       <div
         className="kkres-image-textarea-drop-target"
@@ -378,13 +378,43 @@ function KkresImagePathField({
         <Input.TextArea
           rows={5}
           value={value}
-          placeholder={placeholder ?? '每行一个 staging:xxx.png 或 public-input/xxx.png'}
+          placeholder={placeholder ?? '每行一个本机图片/文件夹路径、staging:xxx.png 或 public-input/xxx.png'}
           onChange={(event) => onChange(event.target.value)}
         />
       </div>
       {description && <small>{description}</small>}
     </div>
   );
+}
+
+
+async function prepareAgentSubmitParams(skillId: AgentSkillDefinition['id'], params: AgentSubmitRequest['params']): Promise<AgentSubmitRequest['params']> {
+  if (skillId !== 'export-kkres-image') return params;
+  const imageLines = splitLineValues(params.images);
+  const preparedLines: string[] = [];
+  const localInputs: string[] = [];
+  for (const image of imageLines) {
+    if (isKkresPublicImageIdentifier(image)) preparedLines.push(image);
+    else localInputs.push(image);
+  }
+  if (localInputs.length === 0) return params;
+  const stagingApi = window.electronAPI?.stageKkresImageInputs;
+  if (!stagingApi) {
+    throw new Error('本机图片路径需要桌面版先上传暂存；Web 模式请填写 staging: 或 public-input/ 图片标识。');
+  }
+  const staged = await stagingApi({ inputs: localInputs, ownerToken: getAgentOwnerToken() });
+  if (!staged.success) throw new Error(staged.error);
+  message.success(`已上传暂存 ${staged.identifiers.length} 张 kkres 图片`);
+  return { ...params, images: [...preparedLines, ...staged.identifiers].join('\n') };
+}
+
+function splitLineValues(value: unknown): string[] {
+  return String(value ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function isKkresPublicImageIdentifier(value: string): boolean {
+  return /^staging:[A-Za-z0-9._/-]+\.(png|jpe?g|webp|bmp)$/i.test(value)
+    || /^public-input\/[A-Za-z0-9._/-]+\.(png|jpe?g|webp|bmp)$/i.test(value);
 }
 
 function mergeLineValues(current: string, additions: string[]): string {

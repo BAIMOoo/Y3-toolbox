@@ -26,9 +26,9 @@ export const AGENT_SKILLS: AgentSkillDefinition[] = [
   {
     id: 'export-kkres-image',
     label: '导出 kkres 高分辨率图片',
-    description: '使用已上传/暂存的图片标识导出 KKExport.kkres；图片上限为 4096*4096。',
+    description: '使用桌面端自动暂存或已上传的图片标识导出 KKExport.kkres；图片上限为 4096*4096。',
     fields: [
-      { name: 'images', label: '图片标识', type: 'textarea', required: true, placeholder: '每行一个 staging:xxx.png 或 public-input/xxx.png', description: '任务服务不接受任意本机路径；请使用上传/暂存后的图片标识。图片上限为 4096*4096。' },
+      { name: 'images', label: '图片输入', type: 'textarea', required: true, placeholder: '每行一个本机图片/文件夹路径、staging:xxx.png 或 public-input/xxx.png', description: '桌面端会先把本机图片上传暂存；任务服务最终只接收 staging: 或 public-input/ 图片标识。图片上限为 4096*4096。' },
     ],
   },
 ];
