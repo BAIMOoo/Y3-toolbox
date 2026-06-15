@@ -22,5 +22,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["scripts/recovery/**/*", "scripts/recovery-tool.ts", "scripts/patch-7z-exit-code.js"]
+  "include": ["scripts/agent-runner/**/*", "scripts/recovery/**/*", "scripts/recovery-tool.ts", "scripts/patch-7z-exit-code.js"]
 }

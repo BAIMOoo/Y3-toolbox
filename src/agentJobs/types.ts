@@ -89,6 +89,25 @@ export interface AgentHealthResponse {
   skills: AgentPublicSkillStatus[];
 }
 
+export interface AgentProviderStatus {
+  name: string;
+  ready: boolean;
+  details: string[];
+}
+
+export interface AgentSkillDiagnosticStatus extends AgentPublicSkillStatus {
+  ready: boolean;
+  details: string[];
+}
+
+export interface AgentDiagnosticsResponse extends AgentHealthResponse {
+  host: string;
+  port: number;
+  allowLan: boolean;
+  agentProvider: AgentProviderStatus;
+  skillDiagnostics: AgentSkillDiagnosticStatus[];
+}
+
 export interface AgentSubmitRequest {
   skillId: AgentSkillId;
   params: Record<string, string | number | boolean | string[]>;
