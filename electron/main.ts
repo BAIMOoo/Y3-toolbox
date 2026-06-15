@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron';
 import fs from 'fs/promises';
+import { createReadStream } from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -151,6 +152,17 @@ ipcMain.handle('dialog:openKkresImageFiles', async () => {
   return result.filePaths;
 });
 
+
+// IPC: kkres 图片输入：把本机图片/目录上传到任务服务暂存区，返回 staging: 标识。
+ipcMain.handle('kkres:stageImageInputs', async (_event, request: unknown) => {
+  try {
+    const identifiers = await stageKkresImageInputs(request);
+    return { success: true, identifiers };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
 // IPC: 读取文件内容
 ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
   try {
@@ -266,6 +278,104 @@ function canReachUrl(url: string): Promise<boolean> {
   });
 }
 
+
+
+const KKRES_STAGE_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp']);
+const KKRES_STAGE_MAX_FILES = 50;
+const KKRES_STAGE_MAX_FILE_BYTES = 64 * 1024 * 1024;
+
+async function stageKkresImageInputs(value: unknown): Promise<string[]> {
+  if (!isPlainObject(value) || !Array.isArray(value.inputs) || typeof value.ownerToken !== 'string') {
+    throw new Error('Invalid kkres staging request');
+  }
+  const ownerToken = value.ownerToken.trim();
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(ownerToken)) throw new Error('Owner token is invalid');
+  const inputPaths = value.inputs
+    .filter((input): input is string => typeof input === 'string')
+    .map((input) => input.trim())
+    .filter(Boolean);
+  if (inputPaths.length === 0) return [];
+
+  const files = await collectKkresImageFiles(inputPaths);
+  if (files.length === 0) throw new Error('未找到可上传的 kkres 图片；支持 png/jpg/webp/bmp。');
+  if (files.length > KKRES_STAGE_MAX_FILES) throw new Error(`一次最多上传 ${KKRES_STAGE_MAX_FILES} 张 kkres 图片。`);
+
+  const identifiers: string[] = [];
+  for (const filePath of files) {
+    identifiers.push(await uploadKkresStagingImage(filePath, ownerToken));
+  }
+  return identifiers;
+}
+
+async function collectKkresImageFiles(inputPaths: string[]): Promise<string[]> {
+  const files: string[] = [];
+  const seen = new Set<string>();
+  for (const inputPath of inputPaths) {
+    const stat = await fs.stat(inputPath).catch(() => null);
+    if (!stat) throw new Error(`图片路径不存在或不可读：${path.basename(inputPath) || inputPath}`);
+    if (stat.isFile()) {
+      await addKkresImageFile(inputPath, seen, files);
+    } else if (stat.isDirectory()) {
+      await walkKkresImageDirectory(inputPath, seen, files);
+    } else {
+      throw new Error(`图片路径不是文件或文件夹：${path.basename(inputPath) || inputPath}`);
+    }
+  }
+  return files;
+}
+
+async function walkKkresImageDirectory(dirPath: string, seen: Set<string>, files: string[]): Promise<void> {
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    if (files.length > KKRES_STAGE_MAX_FILES) return;
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) await walkKkresImageDirectory(fullPath, seen, files);
+    else if (entry.isFile()) await addKkresImageFile(fullPath, seen, files);
+  }
+}
+
+async function addKkresImageFile(filePath: string, seen: Set<string>, files: string[]): Promise<void> {
+  const extension = path.extname(filePath).toLowerCase();
+  if (!KKRES_STAGE_IMAGE_EXTENSIONS.has(extension)) return;
+  const realPath = await fs.realpath(filePath);
+  if (seen.has(realPath)) return;
+  const stat = await fs.stat(realPath);
+  if (!stat.isFile()) return;
+  if (stat.size <= 0) throw new Error(`图片文件为空：${path.basename(filePath)}`);
+  if (stat.size > KKRES_STAGE_MAX_FILE_BYTES) throw new Error(`图片文件超过 64MB：${path.basename(filePath)}`);
+  seen.add(realPath);
+  files.push(realPath);
+}
+
+async function uploadKkresStagingImage(filePath: string, ownerToken: string): Promise<string> {
+  const stat = await fs.stat(filePath);
+  const target = new URL('/api/kkres/staging', getConfiguredAgentRunnerUrl());
+  const response = await fetch(target, {
+    method: 'POST',
+    headers: {
+      'Content-Type': contentTypeForImagePath(filePath),
+      'Content-Length': String(stat.size),
+      'X-Owner-Token': ownerToken,
+      'X-Filename': encodeURIComponent(path.basename(filePath)),
+    },
+    body: createReadStream(filePath) as unknown as BodyInit,
+    duplex: 'half',
+  } as RequestInit & { duplex: 'half' });
+  const payload = await response.json().catch(() => ({})) as { identifier?: unknown; error?: unknown };
+  if (!response.ok || typeof payload.identifier !== 'string') {
+    throw new Error(typeof payload.error === 'string' ? payload.error : `图片上传失败：HTTP ${response.status}`);
+  }
+  return payload.identifier;
+}
+
+function contentTypeForImagePath(filePath: string): string {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === '.png') return 'image/png';
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+  if (extension === '.webp') return 'image/webp';
+  if (extension === '.bmp') return 'image/bmp';
+  return 'application/octet-stream';
+}
 
 interface AgentServiceProxyResponse {
   status: number;

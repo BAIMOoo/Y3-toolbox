@@ -28,14 +28,15 @@ describe('agent skill catalog form contract', () => {
     }
   });
 
-  it('keeps kkres export form limited to image paths and describes server-owned limits', () => {
+  it('keeps kkres export form limited to staged image identifiers and describes desktop staging', () => {
     const skill = AGENT_SKILLS.find((candidate) => candidate.id === 'export-kkres-image');
 
     expect(skill).toBeDefined();
     expect(skill?.fields.map((field) => field.name)).toEqual(['images']);
     expect(skill?.description).toContain('4096*4096');
-    expect(skill?.description).toContain('已上传/暂存');
-    expect(skill?.fields[0]?.description).toContain('任务服务不接受任意本机路径');
+    expect(skill?.description).toContain('自动暂存');
+    expect(skill?.fields[0]?.description).toContain('桌面端会先把本机图片上传暂存');
+    expect(skill?.fields[0]?.description).toContain('任务服务最终只接收');
     expect(skill?.fields[0]?.description).toContain('4096*4096');
     expect(skill?.description).not.toContain('最大尺寸');
     expect(skill?.fields[0]?.description).not.toContain('最大尺寸');
