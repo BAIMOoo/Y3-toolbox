@@ -695,7 +695,13 @@ describe('AgentJobStore', () => {
       "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'utf8 zip decoded_digest=true',artifacts:[{path:zip}],verification:['zip checked'],warnings:[]}));",
     ].join('');
     const sourceRoot = await createHealthyY3SourceRoot(root);
-    const store = new AgentJobStore(config(root, { mockMode: false, mismatchSourceRoot: sourceRoot, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const skillRoot = await createExternalSkillRoot(root, 'fetch-mismatch-logs', path.join('scripts', 'fetch_mismatch_logs.ps1'));
+    const store = new AgentJobStore(config(root, {
+      mockMode: false,
+      mismatchSourceRoot: sourceRoot,
+      agentSkillRoot: skillRoot,
+      agentArgsTemplate: ['-e', script, '{outputDir}'],
+    }));
     const submitted = await store.submit('fetch-mismatch-logs', { mapId: '10204416', days: 7 }, OWNER_TOKEN);
     const done = await waitForTerminal(store, submitted.id);
 
