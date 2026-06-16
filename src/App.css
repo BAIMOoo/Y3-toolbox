@@ -2269,3 +2269,25 @@ button {
     min-width: 0;
   }
 }
+
+.kkres-stage-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent-blue) 8%, var(--bg-secondary));
+}
+
+.kkres-stage-progress__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-primary);
+}
+
+.kkres-stage-progress__header span {
+  color: var(--text-muted);
+  font-size: 12px;
+}

@@ -11,6 +11,7 @@ import {
   isJsonPath,
 } from '../src/archiveViewer/archiveFileContract';
 import { findStartupOpenPath, type StartupOpenPathKind } from './startupOpenPath';
+import { resolveSafeAgentArtifactDownloadUrl } from './agentArtifactDownload';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -156,10 +157,24 @@ ipcMain.handle('dialog:openKkresImageFiles', async () => {
 
 
 // IPC: kkres 图片输入：把本机图片/目录上传到任务服务暂存区，返回 staging: 标识。
-ipcMain.handle('kkres:stageImageInputs', async (_event, request: unknown) => {
+ipcMain.handle('kkres:stageImageInputs', async (event, request: unknown) => {
   try {
-    const identifiers = await stageKkresImageInputs(request);
+    const identifiers = await stageKkresImageInputs(request, (progress) => {
+      event.sender.send('kkres:stageImageProgress', progress);
+    });
     return { success: true, identifiers };
+  } catch (err: unknown) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// IPC: Agent artifact download handoff. Renderer may pass only URLs generated from
+// the configured task service; main validates origin/path before starting download.
+ipcMain.handle('agent-artifact:download', async (event, request: unknown) => {
+  try {
+    const url = resolveSafeAgentArtifactDownloadUrl(request, getConfiguredAgentRunnerUrl());
+    event.sender.downloadURL(url.toString());
+    return { success: true };
   } catch (err: unknown) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
@@ -286,10 +301,26 @@ const KKRES_STAGE_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', 
 const KKRES_STAGE_MAX_FILES = 50;
 const KKRES_STAGE_MAX_FILE_BYTES = 64 * 1024 * 1024;
 
-async function stageKkresImageInputs(value: unknown): Promise<string[]> {
+type KkresStagePhase = 'collecting' | 'uploading' | 'complete' | 'failed';
+
+interface KkresImageStageProgress {
+  requestId: string;
+  phase: KkresStagePhase;
+  currentFile?: string;
+  currentFileIndex: number;
+  totalFiles: number;
+  uploadedBytes: number;
+  totalBytes: number;
+  message: string;
+}
+
+type KkresStageProgressReporter = (progress: KkresImageStageProgress) => void;
+
+async function stageKkresImageInputs(value: unknown, reportProgress?: KkresStageProgressReporter): Promise<string[]> {
   if (!isPlainObject(value) || !Array.isArray(value.inputs) || typeof value.ownerToken !== 'string') {
     throw new Error('Invalid kkres staging request');
   }
+  const requestId = typeof value.requestId === 'string' && value.requestId.trim() ? value.requestId.trim() : `kkres-stage-${Date.now()}`;
   const ownerToken = value.ownerToken.trim();
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(ownerToken)) throw new Error('Owner token is invalid');
   const inputPaths = value.inputs
@@ -298,14 +329,33 @@ async function stageKkresImageInputs(value: unknown): Promise<string[]> {
     .filter(Boolean);
   if (inputPaths.length === 0) return [];
 
+  reportProgress?.({ requestId, phase: 'collecting', currentFileIndex: 0, totalFiles: 0, uploadedBytes: 0, totalBytes: 0, message: '正在扫描图片输入…' });
   const files = await collectKkresImageFiles(inputPaths);
   if (files.length === 0) throw new Error('未找到可上传的 kkres 图片；支持 png/jpg/webp/bmp。');
   if (files.length > KKRES_STAGE_MAX_FILES) throw new Error(`一次最多上传 ${KKRES_STAGE_MAX_FILES} 张 kkres 图片。`);
 
+  const fileSizes = await Promise.all(files.map(async (filePath) => (await fs.stat(filePath)).size));
+  const totalBytes = fileSizes.reduce((sum, size) => sum + size, 0);
   const identifiers: string[] = [];
-  for (const filePath of files) {
-    identifiers.push(await uploadKkresStagingImage(filePath, ownerToken));
+  let uploadedBytes = 0;
+  reportProgress?.({ requestId, phase: 'uploading', currentFileIndex: 0, totalFiles: files.length, uploadedBytes, totalBytes, message: `准备上传 ${files.length} 张图片…` });
+  for (const [index, filePath] of files.entries()) {
+    const beforeFileBytes = uploadedBytes;
+    identifiers.push(await uploadKkresStagingImage(filePath, ownerToken, (fileUploadedBytes) => {
+      reportProgress?.({
+        requestId,
+        phase: 'uploading',
+        currentFile: path.basename(filePath),
+        currentFileIndex: index + 1,
+        totalFiles: files.length,
+        uploadedBytes: beforeFileBytes + fileUploadedBytes,
+        totalBytes,
+        message: `正在上传 ${path.basename(filePath)} (${index + 1}/${files.length})`,
+      });
+    }));
+    uploadedBytes += fileSizes[index] ?? 0;
   }
+  reportProgress?.({ requestId, phase: 'complete', currentFileIndex: files.length, totalFiles: files.length, uploadedBytes: totalBytes, totalBytes, message: `已上传 ${files.length} 张图片` });
   return identifiers;
 }
 
@@ -349,9 +399,15 @@ async function addKkresImageFile(filePath: string, seen: Set<string>, files: str
   files.push(realPath);
 }
 
-async function uploadKkresStagingImage(filePath: string, ownerToken: string): Promise<string> {
+async function uploadKkresStagingImage(filePath: string, ownerToken: string, onProgress?: (uploadedBytes: number) => void): Promise<string> {
   const stat = await fs.stat(filePath);
   const target = new URL('/api/kkres/staging', getConfiguredAgentRunnerUrl());
+  const stream = createReadStream(filePath);
+  let uploadedBytes = 0;
+  stream.on('data', (chunk: Buffer) => {
+    uploadedBytes += chunk.length;
+    onProgress?.(Math.min(uploadedBytes, stat.size));
+  });
   const response = await fetch(target, {
     method: 'POST',
     headers: {
@@ -360,7 +416,7 @@ async function uploadKkresStagingImage(filePath: string, ownerToken: string): Pr
       'X-Owner-Token': ownerToken,
       'X-Filename': encodeURIComponent(path.basename(filePath)),
     },
-    body: createReadStream(filePath) as unknown as BodyInit,
+    body: stream as unknown as BodyInit,
     duplex: 'half',
   } as RequestInit & { duplex: 'half' });
   const payload = await response.json().catch(() => ({})) as { identifier?: unknown; error?: unknown };
@@ -378,6 +434,7 @@ function contentTypeForImagePath(filePath: string): string {
   if (extension === '.bmp') return 'image/bmp';
   return 'application/octet-stream';
 }
+
 
 interface AgentServiceProxyResponse {
   status: number;

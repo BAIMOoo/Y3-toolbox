@@ -23,11 +23,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // kkres 图片输入辅助
   openKkresImageDirectoryDialog: () => ipcRenderer.invoke('dialog:openKkresImageDirectory'),
   openKkresImageFilesDialog: () => ipcRenderer.invoke('dialog:openKkresImageFiles'),
-  stageKkresImageInputs: (request: { inputs: string[]; ownerToken: string }) => ipcRenderer.invoke('kkres:stageImageInputs', request),
+  stageKkresImageInputs: (request: { inputs: string[]; ownerToken: string; requestId?: string }) => ipcRenderer.invoke('kkres:stageImageInputs', request),
+  onKkresImageStageProgress: (callback: (progress: unknown) => void) => {
+    const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress);
+    ipcRenderer.on('kkres:stageImageProgress', handler);
+    return () => ipcRenderer.removeListener('kkres:stageImageProgress', handler);
+  },
 
   // Task service proxy for packaged file:// renderer builds
   getAgentServiceBaseUrl: getConfiguredAgentRunnerUrl,
   agentServiceRequest: (request: { path: string; method?: string; body?: unknown; ownerToken?: string }) => ipcRenderer.invoke('agent-service:request', request),
+  downloadAgentArtifact: (request: { url: string }) => ipcRenderer.invoke('agent-artifact:download', request),
 
   // 自绘窗口控制
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),

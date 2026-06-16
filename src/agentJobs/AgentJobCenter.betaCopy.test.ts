@@ -34,10 +34,13 @@ describe('AgentJobCenter beta warning copy contract', () => {
     expect(source).not.toContain('disabled={Boolean(submitDisabledReason)}');
   });
 
-  it('uses owner-scoped artifact download URLs', () => {
+  it('uses owner-scoped artifact download URLs with a desktop-safe click handoff', () => {
     const source = readFileSync(new URL('./AgentJobCenter.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('getAgentArtifactDownloadUrl(artifact.downloadUrl)');
+    expect(source).toContain('handleAgentArtifactDownloadClick');
+    expect(source).toContain('window.electronAPI');
+    expect(source).not.toContain('target="_blank"');
   });
 
   it('shows only kkres downloads for kkres export jobs', () => {
@@ -59,5 +62,7 @@ describe('AgentJobCenter beta warning copy contract', () => {
     expect(source).toContain('mergeLineValues');
     expect(source).toContain('getDroppedKkresImagePaths');
     expect(source).toContain('kkres-image-textarea-drop-target');
+    expect(source).toContain('subscribeToActiveStageProgress');
+    expect(source).toContain('KkresStageProgressPanel');
   });
 });
