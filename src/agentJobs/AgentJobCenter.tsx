@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
-import { Button, Alert, Card, Input, InputNumber, Select, Space, Tag, Typography, message } from 'antd';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react';
+import { Button, Alert, Card, Input, InputNumber, Progress, Select, Space, Tag, Typography, message } from 'antd';
 import { fetchAgentHealth, getAgentArtifactDownloadUrl, fetchAgentJob, fetchAgentJobEvents, fetchAgentJobs, fetchAgentSkills, getAgentOwnerToken, submitAgentJob } from './api';
 import { applyAgentParamDefaults, getAgentParamDefaults, validateAgentParams } from './catalog';
 import type { AgentHealthResponse, AgentJobEvent, AgentJobEventsResponse, AgentJobSummary, AgentSkillDefinition, AgentSubmitRequest } from './types';
 import { AgentJobEventList } from './AgentJobEventList';
 import { filterUserVisibleJobEvents } from './eventVisibility';
 import { getAgentQueueStatus, getAgentRunnerStatus, hasActiveAgentJobs, isTerminalAgentJob, refreshActiveAgentJobs } from './agentJobCenterStatus';
+import { handleAgentArtifactDownloadClick } from './artifactDownload';
+import { createKkresStageRequestId, subscribeToActiveStageProgress, type StageProgressState } from './stageProgress';
 
 
 export function AgentJobCenter() {
@@ -19,8 +21,10 @@ export function AgentJobCenter() {
   const [health, setHealth] = useState<AgentHealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [stageProgress, setStageProgress] = useState<StageProgressState | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const latestEventIdsRef = useRef<Record<string, number>>({});
+  const activeStageRequestIdRef = useRef<string | null>(null);
 
   const selectedSkill = useMemo(() => skills.find((skill) => skill.id === selectedSkillId) ?? skills[0], [selectedSkillId, skills]);
   const effectiveFormValues = useMemo(() => (selectedSkill ? applyAgentParamDefaults(selectedSkill.id, formValues) : formValues), [selectedSkill, formValues]);
@@ -120,6 +124,22 @@ export function AgentJobCenter() {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: 'end' });
   }, [activeJobStableId, visibleActiveJobEvents.length]);
+  useEffect(() => subscribeToActiveStageProgress(
+    window.electronAPI,
+    () => activeStageRequestIdRef.current,
+    setStageProgress,
+  ), []);
+
+  const handleArtifactDownload = async (event: MouseEvent<HTMLElement>, artifactUrl: string) => {
+    const result = await handleAgentArtifactDownloadClick(event, artifactUrl, window.electronAPI);
+    if (result.error) {
+      setError(result.error);
+      message.error(result.error);
+      return;
+    }
+    if (result.handledByDesktop) message.success('已交给系统下载管理器处理。');
+  };
+
 
   const updateField = (name: string, value: string | number | null) => {
     setFormValues((current) => ({ ...current, [name]: value ?? '' }));
@@ -149,10 +169,16 @@ export function AgentJobCenter() {
     setLoading(true);
     setError(null);
     try {
+      const stageRequestId = createKkresStageRequestId();
       const params = await prepareAgentSubmitParams(
         selectedSkill.id,
         applyAgentParamDefaults(selectedSkill.id, formValues) as AgentSubmitRequest['params'],
         (images) => setFormValues((current) => ({ ...current, images })),
+        stageRequestId,
+        (requestId) => {
+          activeStageRequestIdRef.current = requestId;
+          setStageProgress({ requestId, phase: 'collecting', currentFileIndex: 0, totalFiles: 0, uploadedBytes: 0, totalBytes: 0, message: '正在准备上传图片…', percent: 0 });
+        },
       );
       const validationErrors = validateAgentParams(selectedSkill.id, params);
       if (validationErrors.length > 0) {
@@ -165,7 +191,11 @@ export function AgentJobCenter() {
       void refreshHealth().catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      if (activeStageRequestIdRef.current) {
+        setStageProgress((current) => current ? { ...current, phase: 'failed', message: err instanceof Error ? err.message : String(err) } : current);
+      }
     } finally {
+      activeStageRequestIdRef.current = null;
       setLoading(false);
     }
   };
@@ -241,6 +271,7 @@ export function AgentJobCenter() {
                 </label>
               );
             })}
+            {stageProgress && <KkresStageProgressPanel progress={stageProgress} />}
             <Button type="primary" loading={loading} onClick={() => void submit()}>提交任务</Button>
           </Space>
         </Card>
@@ -265,7 +296,11 @@ export function AgentJobCenter() {
             <p>{activeJob.summary}</p>
             <Space wrap>
               {activeJobDownloadArtifacts.map((artifact) => (
-                <Button key={artifact.id} href={getAgentArtifactDownloadUrl(artifact.downloadUrl)} target="_blank" rel="noreferrer">
+                <Button
+                  key={artifact.id}
+                  href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
+                  onClick={(event) => void handleArtifactDownload(event, getAgentArtifactDownloadUrl(artifact.downloadUrl))}
+                >
                   下载 {artifact.name} ({artifact.sizeBytes} bytes)
                 </Button>
               ))}
@@ -392,10 +427,34 @@ function KkresImagePathField({
 }
 
 
+function KkresStageProgressPanel({ progress }: { progress: StageProgressState }) {
+  const status = progress.phase === 'failed' ? 'exception' : progress.phase === 'complete' ? 'success' : 'active';
+  const byteText = progress.totalBytes > 0 ? `${formatBytes(progress.uploadedBytes)} / ${formatBytes(progress.totalBytes)}` : '正在计算总大小…';
+  const fileText = progress.totalFiles > 0 ? `${progress.currentFileIndex}/${progress.totalFiles}` : '扫描中';
+  return (
+    <div className="kkres-stage-progress" role="status" aria-live="polite">
+      <div className="kkres-stage-progress__header">
+        <strong>{progress.message}</strong>
+        <span>{fileText} · {byteText}</span>
+      </div>
+      <Progress percent={progress.percent} size="small" status={status} />
+    </div>
+  );
+}
+
+function formatBytes(value: number): string {
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+}
+
+
 async function prepareAgentSubmitParams(
   skillId: AgentSkillDefinition['id'],
   params: AgentSubmitRequest['params'],
   onImagesPrepared?: (images: string) => void,
+  stageRequestId?: string,
+  onStageStart?: (requestId: string) => void,
 ): Promise<AgentSubmitRequest['params']> {
   if (skillId !== 'export-kkres-image') return params;
   const imageLines = splitLineValues(params.images);
@@ -410,8 +469,10 @@ async function prepareAgentSubmitParams(
   if (!stagingApi) {
     throw new Error('本机图片路径需要桌面版先上传暂存；Web 模式请填写 staging: 或 public-input/ 图片标识。');
   }
+  const requestId = stageRequestId ?? createKkresStageRequestId();
+  onStageStart?.(requestId);
   message.loading({ content: `正在上传暂存 ${localInputs.length} 个 kkres 本机输入…`, key: 'kkres-stage' });
-  const staged = await stagingApi({ inputs: localInputs, ownerToken: getAgentOwnerToken() });
+  const staged = await stagingApi({ inputs: localInputs, ownerToken: getAgentOwnerToken(), requestId });
   if (!staged.success) {
     message.destroy('kkres-stage');
     throw new Error(staged.error);

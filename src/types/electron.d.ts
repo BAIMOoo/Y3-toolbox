@@ -1,3 +1,16 @@
+export type KkresImageStagePhase = 'collecting' | 'uploading' | 'complete' | 'failed';
+
+export interface KkresImageStageProgress {
+  requestId: string;
+  phase: KkresImageStagePhase;
+  currentFile?: string;
+  currentFileIndex: number;
+  totalFiles: number;
+  uploadedBytes: number;
+  totalBytes: number;
+  message: string;
+}
+
 export interface ElectronAPI {
   openFileDialog: () => Promise<string | null>;
   readFile: (filePath: string) => Promise<
@@ -8,8 +21,13 @@ export interface ElectronAPI {
   openArchiveDirectoryDialog: () => Promise<string | null>;
   openKkresImageDirectoryDialog?: () => Promise<string | null>;
   openKkresImageFilesDialog?: () => Promise<string[]>;
-  stageKkresImageInputs?: (request: { inputs: string[]; ownerToken: string }) => Promise<
+  stageKkresImageInputs?: (request: { inputs: string[]; ownerToken: string; requestId?: string }) => Promise<
     | { success: true; identifiers: string[] }
+    | { success: false; error: string }
+  >;
+  onKkresImageStageProgress?: (callback: (progress: KkresImageStageProgress) => void) => () => void;
+  downloadAgentArtifact?: (request: { url: string }) => Promise<
+    | { success: true }
     | { success: false; error: string }
   >;
   getAgentServiceBaseUrl?: () => string;
