@@ -8,6 +8,7 @@ import { filterUserVisibleJobEvents } from './eventVisibility';
 import { getAgentQueueStatus, getAgentRunnerStatus, hasActiveAgentJobs, isTerminalAgentJob, refreshActiveAgentJobs } from './agentJobCenterStatus';
 import { handleAgentArtifactDownloadClick } from './artifactDownload';
 import { createKkresStageRequestId, subscribeToActiveStageProgress, type StageProgressState } from './stageProgress';
+import type { AgentArtifactDownloadProgress } from '../types/electron';
 
 
 export function AgentJobCenter() {
@@ -22,6 +23,7 @@ export function AgentJobCenter() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [stageProgress, setStageProgress] = useState<StageProgressState | null>(null);
+  const [artifactDownloadProgress, setArtifactDownloadProgress] = useState<AgentArtifactDownloadProgress | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const latestEventIdsRef = useRef<Record<string, number>>({});
   const activeStageRequestIdRef = useRef<string | null>(null);
@@ -129,11 +131,24 @@ export function AgentJobCenter() {
     () => activeStageRequestIdRef.current,
     setStageProgress,
   ), []);
+  useEffect(() => window.electronAPI?.onAgentArtifactDownloadProgress?.((progress) => {
+    setArtifactDownloadProgress(progress);
+  }) ?? (() => undefined), []);
 
-  const handleArtifactDownload = async (event: MouseEvent<HTMLElement>, artifactUrl: string) => {
-    const result = await handleAgentArtifactDownloadClick(event, artifactUrl, window.electronAPI);
+  const handleArtifactDownload = async (event: MouseEvent<HTMLElement>, artifactUrl: string, artifactName?: string) => {
+    setArtifactDownloadProgress({
+      id: `pending-${Date.now()}`,
+      url: artifactUrl,
+      filename: artifactName || artifactUrl.split('/').pop()?.split('?')[0] || 'artifact',
+      receivedBytes: 0,
+      totalBytes: 0,
+      phase: 'started',
+      message: '正在打开保存位置选择…',
+    });
+    const result = await handleAgentArtifactDownloadClick(event, artifactUrl, artifactName, window.electronAPI);
     if (result.error) {
       setError(result.error);
+      setArtifactDownloadProgress((current) => current ? { ...current, phase: 'failed', message: result.error ?? '下载失败' } : current);
       message.error(result.error);
       return;
     }
@@ -299,12 +314,13 @@ export function AgentJobCenter() {
                 <Button
                   key={artifact.id}
                   href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
-                  onClick={(event) => void handleArtifactDownload(event, getAgentArtifactDownloadUrl(artifact.downloadUrl))}
+                  onClick={(event) => void handleArtifactDownload(event, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
                 >
                   下载 {artifact.name} ({artifact.sizeBytes} bytes)
                 </Button>
               ))}
             </Space>
+            {artifactDownloadProgress && <ArtifactDownloadProgressPanel progress={artifactDownloadProgress} />}
             {activeJob.status === 'succeeded' && activeJobDownloadArtifacts.length === 0 && (
               <Alert
                 type="warning"
@@ -438,6 +454,22 @@ function KkresStageProgressPanel({ progress }: { progress: StageProgressState })
         <span>{fileText} · {byteText}</span>
       </div>
       <Progress percent={progress.percent} size="small" status={status} />
+    </div>
+  );
+}
+
+function ArtifactDownloadProgressPanel({ progress }: { progress: AgentArtifactDownloadProgress }) {
+  const status = progress.phase === 'failed' ? 'exception' : progress.phase === 'complete' ? 'success' : progress.phase === 'cancelled' ? 'normal' : 'active';
+  const waitingForSaveLocation = progress.message.includes('选择保存位置');
+  const percent = !waitingForSaveLocation && progress.totalBytes > 0 ? Math.min(100, Math.round((progress.receivedBytes / progress.totalBytes) * 100)) : 0;
+  const byteText = waitingForSaveLocation ? '等待确认保存位置' : progress.totalBytes > 0 ? `${formatBytes(progress.receivedBytes)} / ${formatBytes(progress.totalBytes)}` : formatBytes(progress.receivedBytes);
+  return (
+    <div className="agent-artifact-download-progress" role="status" aria-live="polite">
+      <div className="agent-artifact-download-progress__header">
+        <strong>{progress.message}</strong>
+        <span>{progress.filename} · {byteText}</span>
+      </div>
+      <Progress percent={percent} size="small" status={status} />
     </div>
   );
 }

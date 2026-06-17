@@ -11,6 +11,18 @@ export interface KkresImageStageProgress {
   message: string;
 }
 
+export type AgentArtifactDownloadPhase = 'started' | 'progress' | 'complete' | 'cancelled' | 'failed';
+
+export interface AgentArtifactDownloadProgress {
+  id: string;
+  url: string;
+  filename: string;
+  receivedBytes: number;
+  totalBytes: number;
+  phase: AgentArtifactDownloadPhase;
+  message: string;
+}
+
 export interface ElectronAPI {
   openFileDialog: () => Promise<string | null>;
   readFile: (filePath: string) => Promise<
@@ -26,10 +38,11 @@ export interface ElectronAPI {
     | { success: false; error: string }
   >;
   onKkresImageStageProgress?: (callback: (progress: KkresImageStageProgress) => void) => () => void;
-  downloadAgentArtifact?: (request: { url: string }) => Promise<
+  downloadAgentArtifact?: (request: { url: string; filename?: string }) => Promise<
     | { success: true }
     | { success: false; error: string }
   >;
+  onAgentArtifactDownloadProgress?: (callback: (progress: AgentArtifactDownloadProgress) => void) => () => void;
   getAgentServiceBaseUrl?: () => string;
   agentServiceRequest: (request: { path: string; method?: string; body?: unknown; ownerToken?: string }) => Promise<
     | { success: true; status: number; payload: unknown }

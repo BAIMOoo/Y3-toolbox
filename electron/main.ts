@@ -11,7 +11,7 @@ import {
   isJsonPath,
 } from '../src/archiveViewer/archiveFileContract';
 import { findStartupOpenPath, type StartupOpenPathKind } from './startupOpenPath';
-import { resolveSafeAgentArtifactDownloadUrl } from './agentArtifactDownload';
+import { resolveSafeAgentArtifactDownloadRequest } from './agentArtifactDownload';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +22,17 @@ function getConfiguredAgentRunnerUrl(): string {
   const configuredUrl = process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL;
   if (configuredUrl) return configuredUrl;
   return app.isPackaged ? 'http://127.0.0.1:8790' : 'http://127.0.0.1:8791';
+}
+
+function createAgentArtifactDownloadId(): string {
+  return `artifact-download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getAgentArtifactDownloadFilename(request: unknown, url: URL): string {
+  const requested = isPlainObject(request) && typeof request.filename === 'string' ? request.filename : '';
+  const basename = path.basename(requested || decodeURIComponent(url.pathname));
+  const safe = basename.replace(/[/\\:*?"<>|]/g, '_').trim();
+  return safe || 'artifact';
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -172,8 +183,73 @@ ipcMain.handle('kkres:stageImageInputs', async (event, request: unknown) => {
 // the configured task service; main validates origin/path before starting download.
 ipcMain.handle('agent-artifact:download', async (event, request: unknown) => {
   try {
-    const url = resolveSafeAgentArtifactDownloadUrl(request, getConfiguredAgentRunnerUrl());
-    event.sender.downloadURL(url.toString());
+    const download = resolveSafeAgentArtifactDownloadRequest(request, getConfiguredAgentRunnerUrl());
+    const downloadId = createAgentArtifactDownloadId();
+    const downloadUrl = download.url.toString();
+    const defaultFilename = getAgentArtifactDownloadFilename(request, download.url);
+    event.sender.send('agent-artifact:downloadProgress', {
+      id: downloadId,
+      url: downloadUrl,
+      filename: defaultFilename,
+      receivedBytes: 0,
+      totalBytes: 0,
+      phase: 'started',
+      message: '请选择保存位置…',
+    });
+    const saveDialogOptions = {
+      defaultPath: defaultFilename,
+      title: '保存任务产物',
+    };
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const saveResult = ownerWindow
+      ? await dialog.showSaveDialog(ownerWindow, saveDialogOptions)
+      : await dialog.showSaveDialog(saveDialogOptions);
+    if (saveResult.canceled || !saveResult.filePath) {
+      event.sender.send('agent-artifact:downloadProgress', {
+        id: downloadId,
+        url: downloadUrl,
+        filename: defaultFilename,
+        receivedBytes: 0,
+        totalBytes: 0,
+        phase: 'cancelled',
+        message: '下载已取消',
+      });
+      return { success: true };
+    }
+    const savePath = saveResult.filePath;
+    event.sender.send('agent-artifact:downloadProgress', {
+      id: downloadId,
+      url: downloadUrl,
+      filename: path.basename(savePath),
+      receivedBytes: 0,
+      totalBytes: 0,
+      phase: 'progress',
+      message: '正在启动下载…',
+    });
+    event.sender.session.once('will-download', (_downloadEvent, item) => {
+      item.setSavePath(savePath);
+      const filename = path.basename(savePath);
+      const emitProgress = (phase: 'progress' | 'complete' | 'cancelled' | 'failed', message: string) => {
+        event.sender.send('agent-artifact:downloadProgress', {
+          id: downloadId,
+          url: downloadUrl,
+          filename,
+          receivedBytes: item.getReceivedBytes(),
+          totalBytes: Math.max(0, item.getTotalBytes()),
+          phase,
+          message,
+        });
+      };
+      item.on('updated', (_itemEvent, state) => {
+        emitProgress(state === 'interrupted' ? 'failed' : 'progress', state === 'interrupted' ? '下载中断' : '正在下载…');
+      });
+      item.once('done', (_itemEvent, state) => {
+        if (state === 'completed') emitProgress('complete', '下载完成');
+        else if (state === 'cancelled') emitProgress('cancelled', '下载已取消');
+        else emitProgress('failed', '下载失败');
+      });
+    });
+    event.sender.session.downloadURL(download.url.toString(), { headers: download.headers });
     return { success: true };
   } catch (err: unknown) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
