@@ -2270,16 +2270,19 @@ button {
   }
 }
 
-.kkres-stage-progress {
+.kkres-stage-progress,
+.agent-artifact-download-progress {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 12px;
+  margin-top: 12px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--accent-blue) 8%, var(--bg-secondary));
 }
 
-.kkres-stage-progress__header {
+.kkres-stage-progress__header,
+.agent-artifact-download-progress__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2287,7 +2290,8 @@ button {
   color: var(--text-primary);
 }
 
-.kkres-stage-progress__header span {
+.kkres-stage-progress__header span,
+.agent-artifact-download-progress__header span {
   color: var(--text-muted);
   font-size: 12px;
 }

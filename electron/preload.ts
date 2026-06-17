@@ -33,7 +33,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Task service proxy for packaged file:// renderer builds
   getAgentServiceBaseUrl: getConfiguredAgentRunnerUrl,
   agentServiceRequest: (request: { path: string; method?: string; body?: unknown; ownerToken?: string }) => ipcRenderer.invoke('agent-service:request', request),
-  downloadAgentArtifact: (request: { url: string }) => ipcRenderer.invoke('agent-artifact:download', request),
+  downloadAgentArtifact: (request: { url: string; filename?: string }) => ipcRenderer.invoke('agent-artifact:download', request),
+  onAgentArtifactDownloadProgress: (callback: (progress: unknown) => void) => {
+    const handler = (_event: IpcRendererEvent, progress: unknown) => callback(progress);
+    ipcRenderer.on('agent-artifact:downloadProgress', handler);
+    return () => ipcRenderer.removeListener('agent-artifact:downloadProgress', handler);
+  },
 
   // 自绘窗口控制
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
