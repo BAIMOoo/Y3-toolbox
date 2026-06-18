@@ -298,6 +298,10 @@ body {
   overflow: hidden;
 }
 
+.app-content--agent-jobs {
+  overflow: hidden;
+}
+
 /* —— 交互控件 —— */
 button {
   font-family: var(--font-ui);
@@ -1973,21 +1977,20 @@ button {
 
 /* Agent job center */
 .agent-job-center {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 16px;
   padding: 0 20px 20px;
+  flex: 1;
+  height: 100%;
   min-height: 0;
-  overflow: auto;
-  scroll-padding-top: 112px;
+  overflow: hidden;
   line-break: strict;
   word-break: normal;
   overflow-wrap: break-word;
 }
 
 .agent-job-topbar {
-  position: sticky;
-  top: 0;
   z-index: 30;
   display: flex;
   align-items: center;
@@ -2040,19 +2043,48 @@ button {
   text-wrap: pretty;
 }
 
-.agent-job-grid {
+.agent-job-workspace {
   display: grid;
-  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.35fr);
+  grid-template-columns: minmax(300px, 0.9fr) minmax(300px, 1fr) minmax(380px, 1.28fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .agent-job-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   border-radius: 0;
 }
 
-.agent-job-status-card {
-  min-width: 0;
+.agent-job-card .ant-card-head {
+  flex: 0 0 auto;
+  min-height: 48px;
+}
+
+.agent-job-card .ant-card-body {
+  min-height: 0;
+}
+
+.agent-job-submit-card .ant-card-body {
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.agent-job-list-card,
+.agent-job-detail-card {
+  overflow: hidden;
+}
+
+.agent-job-list-card .ant-card-body,
+.agent-job-detail-card .ant-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .agent-skill-select {
@@ -2144,7 +2176,21 @@ button {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 16px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.agent-job-list-empty,
+.agent-job-detail-empty {
+  display: grid;
+  min-height: 120px;
+  place-items: center;
+  padding: 18px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
 }
 
 .agent-job-row {
@@ -2180,9 +2226,14 @@ button {
 }
 
 .agent-job-detail {
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .agent-job-detail h3 {
@@ -2191,9 +2242,11 @@ button {
 
 .agent-job-events {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 10px;
   margin-top: 16px;
+  min-height: 0;
 }
 
 .agent-job-events-header {
@@ -2209,7 +2262,9 @@ button {
 }
 
 .agent-job-event-list {
-  max-height: 320px;
+  flex: 1;
+  min-height: 220px;
+  max-height: none;
   overflow: auto;
   padding: 10px;
   color: var(--text-primary);
@@ -2255,8 +2310,31 @@ button {
 }
 
 @media (max-width: 980px) {
-  .agent-job-grid {
+  .agent-job-center {
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+  }
+
+  .agent-job-workspace {
     grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .agent-job-list-card,
+  .agent-job-detail-card {
+    min-height: 280px;
+  }
+
+  .agent-job-list {
+    max-height: none;
+  }
+
+  .agent-job-detail {
+    overflow: auto;
+  }
+
+  .agent-job-event-list {
+    flex: 1;
+    max-height: none;
   }
 
   .agent-job-topbar {

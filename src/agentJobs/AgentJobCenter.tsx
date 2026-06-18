@@ -238,8 +238,8 @@ export function AgentJobCenter() {
       />
       {error && <Alert type="error" showIcon closable message={error} onClose={() => setError(null)} />}
 
-      <div className="agent-job-grid">
-        <Card title="提交任务" className="agent-job-card">
+      <div className="agent-job-workspace">
+        <Card title="提交任务" className="agent-job-card agent-job-submit-card">
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Select
               className="agent-skill-select"
@@ -291,65 +291,78 @@ export function AgentJobCenter() {
           </Space>
         </Card>
 
-      <Card title="任务状态" className="agent-job-card agent-job-status-card">
-        {jobs.length === 0 ? (
-          <Typography.Text type="secondary">暂无任务。</Typography.Text>
-        ) : (
-          <div className="agent-job-list">
-            {jobs.map((job) => (
-              <button type="button" key={job.id} className={`agent-job-row ${job.id === activeJob?.id ? 'is-active' : ''}`} onClick={() => setActiveJobId(job.id)} aria-pressed={job.id === activeJob?.id}>
-                <span>{job.skillLabel}</span>
-                <Tag color={job.status === 'succeeded' ? 'success' : job.status === 'failed' ? 'error' : 'processing'}>{job.status}</Tag>
-                <small>{job.summary}</small>
-              </button>
-            ))}
-          </div>
-        )}
-        {activeJob && (
-          <div className="agent-job-detail">
-            <h3>{activeJob.skillLabel}</h3>
-            <p>{activeJob.summary}</p>
-            <Space wrap>
-              {activeJobDownloadArtifacts.map((artifact) => (
-                <Button
-                  key={artifact.id}
-                  href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
-                  onClick={(event) => void handleArtifactDownload(event, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
-                >
-                  下载 {artifact.name} ({artifact.sizeBytes} bytes)
-                </Button>
+        <Card
+          title="任务状态"
+          className="agent-job-card agent-job-list-card"
+          extra={<Typography.Text type="secondary">{jobs.length} 个</Typography.Text>}
+        >
+          {jobs.length === 0 ? (
+            <div className="agent-job-list-empty">
+              <Typography.Text type="secondary">暂无任务。提交任务后会自动出现在这里。</Typography.Text>
+            </div>
+          ) : (
+            <div className="agent-job-list" role="list" aria-label="最近任务列表">
+              {jobs.map((job) => (
+                <button type="button" key={job.id} className={`agent-job-row ${job.id === activeJob?.id ? 'is-active' : ''}`} onClick={() => setActiveJobId(job.id)} aria-pressed={job.id === activeJob?.id}>
+                  <span>{job.skillLabel}</span>
+                  <Tag color={job.status === 'succeeded' ? 'success' : job.status === 'failed' ? 'error' : 'processing'}>{job.status}</Tag>
+                  <small>{job.summary}</small>
+                </button>
               ))}
-            </Space>
-            {artifactDownloadProgress && <ArtifactDownloadProgressPanel progress={artifactDownloadProgress} />}
-            {activeJob.status === 'succeeded' && activeJobDownloadArtifacts.length === 0 && (
-              <Alert
-                type="warning"
-                showIcon
-                message="任务已完成，但没有可下载文件"
-                description="任务服务未生成可下载的 ZIP/KKRES，或产物不适合在当前页面公开下载。请查看执行日志中的下载包/附件提示。"
-              />
-            )}
-            <div className="agent-job-events">
-              <div className="agent-job-events-header">
-                <h4>执行日志 / 实时进度</h4>
-                <Typography.Text type="secondary">latest #{activeJobEventMeta?.latestEventId ?? 0}</Typography.Text>
-              </div>
-              {activeJobEventMeta?.truncatedBefore !== undefined && (
+            </div>
+          )}
+        </Card>
+
+        <Card title="任务详情" className="agent-job-card agent-job-detail-card">
+          {activeJob ? (
+            <div className="agent-job-detail">
+              <h3>{activeJob.skillLabel}</h3>
+              <p>{activeJob.summary}</p>
+              <Space wrap>
+                {activeJobDownloadArtifacts.map((artifact) => (
+                  <Button
+                    key={artifact.id}
+                    href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
+                    onClick={(event) => void handleArtifactDownload(event, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
+                  >
+                    下载 {artifact.name} ({artifact.sizeBytes} bytes)
+                  </Button>
+                ))}
+              </Space>
+              {artifactDownloadProgress && <ArtifactDownloadProgressPanel progress={artifactDownloadProgress} />}
+              {activeJob.status === 'succeeded' && activeJobDownloadArtifacts.length === 0 && (
                 <Alert
                   type="warning"
                   showIcon
-                  message={`日志窗口已截断，早于 #${activeJobEventMeta.truncatedBefore} 的事件未显示。`}
+                  message="任务已完成，但没有可下载文件"
+                  description="任务服务未生成可下载的 ZIP/KKRES，或产物不适合在当前页面公开下载。请查看执行日志中的下载包/附件提示。"
                 />
               )}
-              <AgentJobEventList
-                events={activeJobEvents}
-                emptyMessage="暂无可见进度事件；任务开始后会自动刷新。"
-                logEndRef={logEndRef}
-              />
+              <div className="agent-job-events">
+                <div className="agent-job-events-header">
+                  <h4>执行日志 / 实时进度</h4>
+                  <Typography.Text type="secondary">latest #{activeJobEventMeta?.latestEventId ?? 0}</Typography.Text>
+                </div>
+                {activeJobEventMeta?.truncatedBefore !== undefined && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={`日志窗口已截断，早于 #${activeJobEventMeta.truncatedBefore} 的事件未显示。`}
+                  />
+                )}
+                <AgentJobEventList
+                  events={activeJobEvents}
+                  emptyMessage="暂无可见进度事件；任务开始后会自动刷新。"
+                  logEndRef={logEndRef}
+                />
+              </div>
             </div>
-          </div>
-        )}
-      </Card>
+          ) : (
+            <div className="agent-job-detail-empty">
+              <Typography.Text type="secondary">选择左侧任务后查看摘要、实时日志与下载结果。</Typography.Text>
+            </div>
+          )}
+        </Card>
       </div>
     </section>
   );
