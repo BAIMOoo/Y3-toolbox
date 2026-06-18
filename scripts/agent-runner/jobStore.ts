@@ -14,8 +14,8 @@ const PROGRESS_FILE = 'progress.jsonl';
 const EVENT_LOG_VERSION = 1;
 const JOB_STATE_VERSION = 1;
 const MAX_EVENT_RESPONSE = 500;
-const MAX_PUBLIC_ZIP_ARTIFACT_BYTES = 10 * 1024 * 1024;
-const MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES = 1024 * 1024;
+const MAX_PUBLIC_ZIP_ARTIFACT_BYTES = 100 * 1024 * 1024;
+const MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES = 100 * 1024 * 1024;
 const PUBLIC_ARTIFACT_DIR = '.public-artifacts';
 const ZIP_UTF8_FILENAME_FLAG = 0x0800;
 const WINDOWS_PATH_PATTERN = /[A-Za-z]:(?:\\\\|\\)[^\s;,)"]+/g;
@@ -632,7 +632,7 @@ async function sanitizedPublicZipArtifact(filePath: string, outputDir: string): 
     const content = zipEntryContent(entry.compressed, entry.compressionMethod, entry.uncompressedSize);
     if (!content) continue;
     const body = redactPublicZipEntryContent(content);
-    if (!body || hasUnsafePublicText(body.toString('utf8'))) continue;
+    if (body.length === 0 || hasUnsafePublicText(body.toString('utf8'))) continue;
     sanitized.push({ name: entry.name, content: body });
   }
   if (sanitized.length === 0) return null;
@@ -691,9 +691,10 @@ function zipEntryContent(compressed: Buffer, method: number, uncompressedSize: n
   try {
     if (uncompressedSize > MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES) return null;
     if (method === 0) return compressed;
-    if (method === 8) return inflateRawSync(compressed);
+    if (method === 8) return inflateRawSync(compressed, { maxOutputLength: MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES });
     return null;
-  } catch {
+  } catch (err) {
+    console.error('zipEntryContent decompression failed:', err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -846,9 +847,10 @@ function zipEntryText(compressed: Buffer, method: number, uncompressedSize: numb
   try {
     if (uncompressedSize > MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES) return UNSAFE_ZIP_ENTRY_CONTENT;
     if (method === 0) return compressed.toString('utf8');
-    if (method === 8) return inflateRawSync(compressed).toString('utf8');
+    if (method === 8) return inflateRawSync(compressed, { maxOutputLength: MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES }).toString('utf8');
     return UNSAFE_ZIP_ENTRY_CONTENT;
-  } catch {
+  } catch (err) {
+    console.error('zipEntryText decompression failed:', err instanceof Error ? err.message : String(err));
     return UNSAFE_ZIP_ENTRY_CONTENT;
   }
 }
