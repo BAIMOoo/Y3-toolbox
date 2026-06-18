@@ -31,6 +31,19 @@ describe('AgentJobEventList', () => {
     expect(html).not.toContain('raw stderr hidden');
   });
 
+  it('renders event metadata above long messages so messages can use full row width', () => {
+    const events: AgentJobEvent[] = [
+      { ...baseEvent, id: 1, type: 'succeeded', message: '已成功导出 KKExport.kkres，可下载使用。 生成 1 个附件。 验证：已读取并执行 export-kkres-image 技能流程；已验证输入图片、运行时根目录、dm 仓库根目录和项目路径存在。' },
+    ];
+
+    const html = renderToStaticMarkup(React.createElement(AgentJobEventList, { events, emptyMessage: 'empty' }));
+
+    expect(html).toContain('class="agent-job-event-meta"');
+    expect(html).toContain('class="agent-job-event-tags"');
+    expect(html).toContain('class="agent-job-event-message"');
+    expect(html).toContain('验证：已读取并执行 export-kkres-image 技能流程');
+  });
+
   it('shows the empty message when only hidden raw output exists', () => {
     const events: AgentJobEvent[] = [
       { ...baseEvent, id: 1, type: 'agent-output', stream: 'stdout', message: 'raw stdout hidden' },

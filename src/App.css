@@ -2284,6 +2284,76 @@ button {
   overflow-wrap: break-word;
 }
 
+.agent-job-summary {
+  max-width: 72ch;
+  line-height: 1.65;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.agent-job-download-button.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 40px;
+  height: auto;
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--accent-blue) 30%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-blue) 7%, var(--bg-tertiary));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.agent-job-download-button.ant-btn:hover,
+.agent-job-download-button.ant-btn:focus-visible {
+  color: var(--accent-blue-strong);
+  border-color: color-mix(in srgb, var(--accent-blue-strong) 58%, var(--border));
+  background: color-mix(in srgb, var(--accent-blue) 12%, var(--bg-card-hover));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 0 0 3px var(--accent-blue-dim);
+}
+
+.agent-job-download-icon {
+  flex: 0 0 auto;
+  color: var(--accent-blue);
+  font-size: 13px;
+}
+
+.agent-job-downloads {
+  margin-top: 8px;
+}
+
+.agent-job-download-label {
+  flex: 0 0 auto;
+}
+
+.agent-job-download-name {
+  min-width: 0;
+  max-width: min(28ch, 34vw);
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-job-download-size {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 17px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
+}
+
 .agent-job-events {
   display: flex;
   flex: 1;
@@ -2317,11 +2387,10 @@ button {
 }
 
 .agent-job-event {
-  display: grid;
-  grid-template-columns: auto auto auto minmax(0, 1fr);
-  gap: 8px;
-  align-items: baseline;
-  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -2329,10 +2398,32 @@ button {
   border-bottom: 0;
 }
 
+.agent-job-event-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
 .agent-job-event-time {
+  flex: 0 0 auto;
   color: var(--text-muted);
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.agent-job-event-tags {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  text-align: right;
 }
 
 .agent-job-event-message,
