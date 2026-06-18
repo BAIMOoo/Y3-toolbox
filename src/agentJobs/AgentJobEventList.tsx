@@ -24,9 +24,13 @@ export function AgentJobEventList({ events, emptyMessage, logEndRef }: AgentJobE
       <div className="agent-job-event-list" role="log" aria-live="polite" aria-label="Agent job event log">
         {visibleEvents.map((event) => (
           <div key={event.id} className={`agent-job-event agent-job-event--${event.type} ${event.stream ? `agent-job-event--${event.stream}` : ''}`}>
-            <span className="agent-job-event-time">{formatEventTime(event.createdAt)}</span>
-            <Tag color={eventTagColor(event.type)}>{event.type}</Tag>
-            {event.stream && <Tag>{event.stream}</Tag>}
+            <span className="agent-job-event-meta">
+              <span className="agent-job-event-time">{formatEventTime(event.createdAt)}</span>
+              <span className="agent-job-event-tags">
+                <Tag color={eventTagColor(event.type)}>{event.type}</Tag>
+                {event.stream && <Tag>{event.stream}</Tag>}
+              </span>
+            </span>
             <span className="agent-job-event-message">{event.message}</span>
           </div>
         ))}

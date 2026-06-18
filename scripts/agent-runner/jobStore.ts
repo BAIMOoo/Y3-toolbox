@@ -576,8 +576,8 @@ function isPublicDownloadArtifact(job: StoredJob, artifact: InternalArtifact): b
 function publicSummary(summary: string, job: StoredJob, artifactCount: number): string {
   const extensions = AGENT_SKILL_CONTRACTS[job.skillId]?.downloadableExtensions;
   if (!extensions?.includes('.zip')) return redactPublicText(summary);
-  const replacement = artifactCount > 0 ? `，生成 ${artifactCount} 个下载包` : '，未发现下载包';
-  return redactPublicText(summary).replace(/，生成 \d+ 个附件/, replacement);
+  const replacement = artifactCount > 0 ? `生成 ${artifactCount} 个下载包。` : '未发现下载包。';
+  return redactPublicText(summary).replace(/生成 \d+ 个附件。?/, replacement);
 }
 
 function redactPublicText(value: string): string {
@@ -1008,10 +1008,23 @@ async function buildArtifacts(job: StoredJob, files: string[]): Promise<Internal
 }
 
 function summarizeSuccess(manifest: AgentResultManifest, output: string, artifactCount: number): string {
-  const suffix = artifactCount > 0 ? `，生成 ${artifactCount} 个附件` : '，未发现附件';
-  const verification = manifest.verification?.length ? ` 验证：${manifest.verification.slice(0, 2).join('；')}` : '';
-  const fallback = output.trim().slice(0, 200);
-  return redactPublicText(`${manifest.summary}${suffix}${verification || (fallback ? `。${fallback}` : '')}`);
+  const sentences = [
+    ensureSentence(manifest.summary),
+    artifactCount > 0 ? `生成 ${artifactCount} 个附件。` : '未发现附件。',
+  ];
+  if (manifest.verification?.length) {
+    sentences.push(`验证：${manifest.verification.slice(0, 2).join('；')}。`);
+  } else {
+    const fallback = output.trim().slice(0, 200);
+    if (fallback) sentences.push(ensureSentence(fallback));
+  }
+  return redactPublicText(sentences.join('\n'));
+}
+
+function ensureSentence(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return /[。！？.!?]$/.test(trimmed) ? trimmed : `${trimmed}。`;
 }
 
 async function resolveUnder(root: string, target: string): Promise<string | null> {
