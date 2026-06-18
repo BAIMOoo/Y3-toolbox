@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react';
+import { DownloadOutlined } from '@ant-design/icons';
 import { Button, Alert, Card, Input, InputNumber, Progress, Select, Space, Tag, Typography, message } from 'antd';
 import { fetchAgentHealth, getAgentArtifactDownloadUrl, fetchAgentJob, fetchAgentJobEvents, fetchAgentJobs, fetchAgentSkills, getAgentOwnerToken, submitAgentJob } from './api';
 import { applyAgentParamDefaults, getAgentParamDefaults, validateAgentParams } from './catalog';
@@ -7,6 +8,7 @@ import { AgentJobEventList } from './AgentJobEventList';
 import { filterUserVisibleJobEvents } from './eventVisibility';
 import { getAgentQueueStatus, getAgentRunnerStatus, hasActiveAgentJobs, isTerminalAgentJob, refreshActiveAgentJobs } from './agentJobCenterStatus';
 import { handleAgentArtifactDownloadClick } from './artifactDownload';
+import { formatArtifactSize } from './formatArtifactSize';
 import { createKkresStageRequestId, subscribeToActiveStageProgress, type StageProgressState } from './stageProgress';
 import type { AgentArtifactDownloadProgress } from '../types/electron';
 
@@ -320,15 +322,21 @@ export function AgentJobCenter() {
           {activeJob ? (
             <div className="agent-job-detail">
               <h3>{activeJob.skillLabel}</h3>
-              <p>{activeJob.summary}</p>
-              <Space wrap>
+              <p className="agent-job-summary">{activeJob.summary}</p>
+              <Space wrap className="agent-job-downloads">
                 {activeJobDownloadArtifacts.map((artifact) => (
                   <Button
                     key={artifact.id}
+                    size="large"
+                    className="agent-job-download-button"
                     href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
+                    title={`下载 ${artifact.name} (${formatArtifactSize(artifact.sizeBytes)})`}
                     onClick={(event) => void handleArtifactDownload(event, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
                   >
-                    下载 {artifact.name} ({artifact.sizeBytes} bytes)
+                    <DownloadOutlined className="agent-job-download-icon" aria-hidden="true" />
+                    <span className="agent-job-download-label">下载</span>
+                    <span className="agent-job-download-name">{artifact.name}</span>
+                    <span className="agent-job-download-size">{formatArtifactSize(artifact.sizeBytes)}</span>
                   </Button>
                 ))}
               </Space>

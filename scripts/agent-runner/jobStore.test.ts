@@ -268,6 +268,49 @@ describe('AgentJobStore', () => {
     await expect(fs.readFile(path.join(root, 'jobs', done.id, 'fetch_summary.csv'), 'utf8')).resolves.toContain('mock,1');
   });
 
+  it('builds success summaries as complete sentences without punctuation collisions', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-summary-punctuation-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "const kkres=path.join(out,'KKExport.kkres');",
+      "fs.writeFileSync(kkres,'mock kkres');",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'已成功导出 KKExport.kkres，可下载使用。',artifacts:[{path:kkres}],verification:['已读取并执行 export-kkres-image 技能流程','已验证输入图片、运行时根目录、dm 仓库根目录和项目路径存在']}));",
+    ].join('');
+    const runtimeRoot = path.join(root, 'runtime');
+    const repoRoot = path.join(root, 'repo');
+    const publicRoot = path.join(root, 'public-images');
+    await fs.mkdir(path.join(runtimeRoot, 'Engine', 'Binaries', 'Win64'), { recursive: true });
+    await fs.writeFile(path.join(runtimeRoot, 'Engine', 'Binaries', 'Win64', 'Game_x64h.exe'), '');
+    await fs.mkdir(path.join(repoRoot, 'clients', 'custom_res'), { recursive: true });
+    await fs.writeFile(path.join(repoRoot, 'clients', 'custom_res', 'custom_utils.py'), '# helper');
+    await fs.mkdir(path.join(publicRoot, 'staging'), { recursive: true });
+    await fs.writeFile(path.join(publicRoot, 'staging', 'a.png'), 'png');
+    const skillRoot = await createExternalSkillRoot(root, 'export-kkres-image', path.join('scripts', 'prepare_export_kkres_image.py'));
+    const store = new AgentJobStore(config(root, {
+      mockMode: false,
+      kkresRuntimeRoot: runtimeRoot,
+      kkresRepoRoot: repoRoot,
+      kkresPublicInputRoot: publicRoot,
+      agentSkillRoot: skillRoot,
+      agentArgsTemplate: ['-e', script, '{outputDir}'],
+    }));
+
+    const submitted = await store.submit('export-kkres-image', { images: 'staging:a.png' }, OWNER_TOKEN);
+    const done = await waitForTerminal(store, submitted.id);
+    await waitForPersistedStatus(root, done.id, 'succeeded');
+    const eventLines = (await fs.readFile(path.join(root, 'jobs', done.id, 'events.jsonl'), 'utf8')).trim().split(/\r?\n/);
+    const persistedEvents = eventLines.map((line) => JSON.parse(line) as { event?: { type?: string; message?: string } });
+    const succeededMessage = persistedEvents.find((entry) => entry.event?.type === 'succeeded')?.event?.message ?? '';
+
+    expect(done.status).toBe('succeeded');
+    expect(done.summary).toContain('已成功导出 KKExport.kkres，可下载使用。\n生成 1 个附件。\n验证：');
+    expect(done.summary).not.toMatch(/[。！？.!?]，/);
+    expect(succeededMessage).toBe(done.summary);
+    expect(succeededMessage).not.toMatch(/[。！？.!?]，/);
+  });
+
   it('exposes only zip artifacts for mismatch jobs while preserving loose JSON output', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-mismatch-'));
     const store = new AgentJobStore(config(root, { mockMode: true }));
