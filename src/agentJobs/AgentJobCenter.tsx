@@ -292,7 +292,7 @@ export function AgentJobCenter() {
         </Card>
 
         <Card
-          title="任务状态"
+          title="任务列表"
           className="agent-job-card agent-job-list-card"
           extra={<Typography.Text type="secondary">{jobs.length} 个</Typography.Text>}
         >
@@ -304,9 +304,12 @@ export function AgentJobCenter() {
             <div className="agent-job-list" role="list" aria-label="最近任务列表">
               {jobs.map((job) => (
                 <button type="button" key={job.id} className={`agent-job-row ${job.id === activeJob?.id ? 'is-active' : ''}`} onClick={() => setActiveJobId(job.id)} aria-pressed={job.id === activeJob?.id}>
-                  <span>{job.skillLabel}</span>
-                  <Tag color={job.status === 'succeeded' ? 'success' : job.status === 'failed' ? 'error' : 'processing'}>{job.status}</Tag>
-                  <small>{job.summary}</small>
+                  <span className={`agent-job-row__rail agent-job-row__rail--${job.status}`} aria-hidden="true" />
+                  <span className="agent-job-row__main">
+                    <span className="agent-job-row__title">{job.skillLabel}</span>
+                    <span className="agent-job-row__time">{formatAgentJobListTime(job.createdAt)}</span>
+                  </span>
+                  <Tag color={getAgentJobStatusView(job).color}>{getAgentJobStatusView(job).label}</Tag>
                 </button>
               ))}
             </div>
@@ -366,6 +369,25 @@ export function AgentJobCenter() {
       </div>
     </section>
   );
+}
+
+function getAgentJobStatusView(job: AgentJobSummary): { label: string; color: 'success' | 'error' | 'processing' | 'warning' } {
+  switch (job.status) {
+    case 'queued':
+      return { label: '等待', color: 'warning' };
+    case 'running':
+      return { label: '执行中', color: 'processing' };
+    case 'succeeded':
+      return { label: '成功', color: 'success' };
+    case 'failed':
+      return { label: '重试', color: 'error' };
+  }
+}
+
+function formatAgentJobListTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
 
