@@ -851,6 +851,9 @@ describe('public backend guardrails', () => {
       "fs.writeFileSync(safe, zipLocal('summary.csv',['player,matched_log_count','mock,1',''].join(String.fromCharCode(10))));",
       "fs.writeFileSync(unsafeName, zipLocal('../stderr.ps1','hidden but named unsafe'));",
       "fs.writeFileSync(unsafeContent, zipLocal('summary.csv','safe prefix '+('x'.repeat(4096))+' I:\\\\map\\\\src AGENT_TOKEN=value'));",
+      // oversizedContent passes the 100MB entry scan limit (1MB+1 < 100MB) and has safe content,
+      // but it's never reached because buildArtifacts breaks after the first valid artifact (safe).
+      // The 100MB entry boundary is enforced at runtime by inflateRawSync's maxOutputLength option.
       "fs.writeFileSync(oversizedContent, zipLocal('summary.csv','x'.repeat(1024*1024+1)));",
       "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'zip names checked',artifacts:[{path:safe},{path:unsafeName},{path:unsafeContent},{path:oversizedContent}],verification:['zip checked'],warnings:[]}));",
     ].join('');
