@@ -837,6 +837,54 @@ describe('public backend guardrails', () => {
   });
 
 
+
+  it('keeps store reads responsive while public zip artifacts are sanitized off the main thread', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-zip-responsive-'));
+    const largeBodyBytes = 8 * 1024 * 1024;
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const zlib=require('zlib');",
+      "const out=process.argv[1];",
+      "function crc32(buf){let c=~0; for(const b of buf){c^=b; for(let k=0;k<8;k++) c=(c>>>1)^(0xedb88320&-(c&1));} return ~c>>>0;}",
+      "function zipPack(name, raw){const n=Buffer.from(name); const data=zlib.deflateRawSync(raw); const h=Buffer.alloc(30); h.writeUInt32LE(0x04034b50,0); h.writeUInt16LE(8,8); h.writeUInt32LE(crc32(raw),14); h.writeUInt32LE(data.length,18); h.writeUInt32LE(raw.length,22); h.writeUInt16LE(n.length,26); const c=Buffer.alloc(46); c.writeUInt32LE(0x02014b50,0); c.writeUInt16LE(20,4); c.writeUInt16LE(20,6); c.writeUInt16LE(8,10); c.writeUInt32LE(crc32(raw),16); c.writeUInt32LE(data.length,20); c.writeUInt32LE(raw.length,24); c.writeUInt16LE(n.length,28); const off=h.length+n.length+data.length; const e=Buffer.alloc(22); e.writeUInt32LE(0x06054b50,0); e.writeUInt16LE(1,8); e.writeUInt16LE(1,10); e.writeUInt32LE(c.length+n.length,12); e.writeUInt32LE(off,16); return Buffer.concat([h,n,data,c,n,e]);}",
+      "const raw=Buffer.alloc(" + largeBodyBytes + ", 97);",
+      "const zip=path.join(out,'archive-change.zip');",
+      "fs.writeFileSync(zip, zipPack('summary.csv', raw));",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'large zip done',artifacts:[{path:zip}],verification:['zip checked'],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'], maxCapturedOutputChars: 1000 }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230',
+      mapId: '204521',
+      from: '2026.06.09-00:00:00',
+      to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.16');
+
+    const start = Date.now();
+    let observedRunning = false;
+    while (Date.now() - start < 10_000) {
+      const job = store.getJob(submitted.id, OWNER_TOKEN);
+      if (job?.status === 'running') observedRunning = true;
+      if (observedRunning) {
+        const before = Date.now();
+        const status = store.queueStatus();
+        expect(status.running).toBeGreaterThanOrEqual(0);
+        expect(Date.now() - before).toBeLessThan(100);
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(observedRunning).toBe(true);
+    let done = store.getJob(submitted.id, OWNER_TOKEN);
+    for (let i = 0; i < 200 && done?.status !== 'succeeded' && done?.status !== 'failed'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      done = store.getJob(submitted.id, OWNER_TOKEN);
+    }
+    if (!done || done.status !== 'succeeded') throw new Error(`job did not finish sanitizing public zip: ${done?.status ?? 'missing'}`);
+    expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['archive-change.zip']);
+  }, 20_000);
+
   it('repackages public zip artifacts with only redacted user result files', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-zip-redact-'));
     const script = [
