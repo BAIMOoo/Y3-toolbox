@@ -1,9 +1,11 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { deflateRawSync, inflateRawSync } from 'node:zlib';
+import { Worker } from 'node:worker_threads';
+import { inflateRawSync } from 'node:zlib';
 import type { Readable } from 'node:stream';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { isAgentSkillId, validateAgentParams, TRUSTED_RUNNER_WARNING } from '../../src/agentJobs/catalog';
 import type { AgentArtifact, AgentDiagnosticsResponse, AgentHealthResponse, AgentJobStatus, AgentJobSummary } from '../../src/agentJobs/types';
 import { AGENT_SKILL_CONTRACTS, buildAgentExecution, buildMockAgentCommand, checkAgentProvider, type AgentJobEvent, type AgentResultManifest, type RunnerCommand, type RunnerConfig } from './contracts';
@@ -17,7 +19,6 @@ const MAX_EVENT_RESPONSE = 500;
 const MAX_PUBLIC_ZIP_ARTIFACT_BYTES = 100 * 1024 * 1024;
 const MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES = 100 * 1024 * 1024;
 const PUBLIC_ARTIFACT_DIR = '.public-artifacts';
-const ZIP_UTF8_FILENAME_FLAG = 0x0800;
 const WINDOWS_PATH_PATTERN = /[A-Za-z]:(?:\\\\|\\)[^\s;,)"]+/g;
 const UNC_PATH_PATTERN = /\\\\[^\s;,)"]+/g;
 const POSIX_MOUNT_PATH_PATTERN = /\/mnt\/[a-z]\/[^\s;,)"]+/g;
@@ -611,172 +612,60 @@ function hasUnsafeArchiveName(name: string): boolean {
 }
 
 
-async function preparePublicArtifact(skillId: StoredJob['skillId'], filePath: string, outputDir: string): Promise<string | null> {
+async function preparePublicArtifact(skillId: StoredJob['skillId'], filePath: string, outputDir: string): Promise<PreparedArtifact | null> {
   const extension = path.extname(filePath).toLowerCase();
-  if (skillId === 'export-kkres-image') return extension === '.kkres' ? filePath : null;
-  if (extension !== '.zip') return await hasSafePublicArtifactContent(skillId, filePath) ? filePath : null;
+  if (skillId === 'export-kkres-image') return extension === '.kkres' ? { path: filePath, trustedContent: false } : null;
+  if (extension !== '.zip') return await hasSafePublicArtifactContent(skillId, filePath) ? { path: filePath, trustedContent: false } : null;
   const safeZip = await sanitizedPublicZipArtifact(filePath, outputDir);
-  return safeZip;
+  return safeZip ? { path: safeZip, trustedContent: true } : null;
 }
 
 async function sanitizedPublicZipArtifact(filePath: string, outputDir: string): Promise<string | null> {
   const stat = await fs.stat(filePath);
   if (stat.size > MAX_PUBLIC_ZIP_ARTIFACT_BYTES) return null;
-  const buffer = await fs.readFile(filePath);
-  const entries = zipEntriesFromBuffer(buffer);
-  if (!entries?.length) return null;
-
-  const sanitized: ZipRepackEntry[] = [];
-  for (const entry of entries) {
-    if (!isUserResultZipEntry(entry.name)) continue;
-    const content = zipEntryContent(entry.compressed, entry.compressionMethod, entry.uncompressedSize);
-    if (!content) continue;
-    const body = redactPublicZipEntryContent(content);
-    if (body.length === 0 || hasUnsafePublicText(body.toString('utf8'))) continue;
-    sanitized.push({ name: entry.name, content: body });
-  }
-  if (sanitized.length === 0) return null;
+  const sanitized = await sanitizeZipArtifactOffThread(await fs.readFile(filePath));
+  if (!sanitized) return null;
 
   const publicDir = path.join(outputDir, PUBLIC_ARTIFACT_DIR);
   await fs.mkdir(publicDir, { recursive: true });
   const publicName = path.basename(filePath);
   const publicPath = path.join(publicDir, publicName);
-  await fs.writeFile(publicPath, zipBufferFromEntries(sanitized));
+  await fs.writeFile(publicPath, sanitized);
   return publicPath;
 }
 
-interface ZipParsedEntry {
-  name: string;
-  compressionMethod: number;
-  compressed: Buffer;
-  uncompressedSize: number;
-}
 
-interface ZipRepackEntry {
-  name: string;
-  content: Buffer;
-}
-
-function zipEntriesFromBuffer(buffer: Buffer): ZipParsedEntry[] | null {
-  const directory = zipCentralDirectoryInfo(buffer);
-  if (!directory) return null;
-  const entries: ZipParsedEntry[] = [];
-  let offset = 0;
-  while (offset < directory.centralOffset) {
-    if (offset + 30 > buffer.length || buffer.readUInt32LE(offset) !== 0x04034b50) return null;
-    const flags = buffer.readUInt16LE(offset + 6);
-    if ((flags & 0x08) !== 0) return null;
-    const compressionMethod = buffer.readUInt16LE(offset + 8);
-    const compressedSize = buffer.readUInt32LE(offset + 18);
-    const uncompressedSize = buffer.readUInt32LE(offset + 22);
-    const nameLength = buffer.readUInt16LE(offset + 26);
-    const extraLength = buffer.readUInt16LE(offset + 28);
-    const nameStart = offset + 30;
-    const nameEnd = nameStart + nameLength;
-    const contentStart = nameEnd + extraLength;
-    const contentEnd = contentStart + compressedSize;
-    if (nameLength <= 0 || nameEnd > buffer.length || contentEnd > buffer.length || contentEnd > directory.centralOffset) return null;
-    entries.push({
-      name: buffer.subarray(nameStart, nameEnd).toString('utf8'),
-      compressionMethod,
-      compressed: buffer.subarray(contentStart, contentEnd),
-      uncompressedSize,
+async function sanitizeZipArtifactOffThread(buffer: Buffer): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'zipSanitizerWorker.cjs');
+    const worker = new Worker(workerPath, { workerData: buffer });
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const timer = setTimeout(() => {
+      void worker.terminate();
+      finish(() => reject(new Error('Timed out while sanitizing public zip artifact')));
+    }, 120_000);
+    worker.once('message', (message: { ok: true; buffer: Uint8Array | null } | { ok: false; error: string }) => {
+      finish(() => {
+        if (!message.ok) reject(new Error(message.error));
+        else resolve(message.buffer ? Buffer.from(message.buffer) : null);
+      });
     });
-    offset = contentEnd;
-  }
-  return offset === directory.centralOffset ? entries : null;
+    worker.once('error', (err) => finish(() => reject(err)));
+    worker.once('exit', (code) => {
+      if (code !== 0) finish(() => reject(new Error(`Zip sanitizer worker exited with code ${code}`)));
+    });
+  });
 }
 
-function zipEntryContent(compressed: Buffer, method: number, uncompressedSize: number): Buffer | null {
-  try {
-    if (uncompressedSize > MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES) return null;
-    if (method === 0) return compressed;
-    if (method === 8) return inflateRawSync(compressed, { maxOutputLength: MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES });
-    return null;
-  } catch (err) {
-    console.error('zipEntryContent decompression failed:', err instanceof Error ? err.message : String(err));
-    return null;
-  }
-}
-
-function redactPublicZipEntryContent(content: Buffer): Buffer {
-  if (content.includes(0)) return content;
-  const text = content.toString('utf8');
-  if (text.includes('\uFFFD')) return content;
-  const redacted = redactPublicTextContent(text)
-    .replace(/[^\s\\/"']+\.(?:exe|bat|cmd|ps1|sh|py)\b/gi, '[executable]');
-  return Buffer.from(redacted, 'utf8');
-}
-
-function isUserResultZipEntry(name: string): boolean {
-  const normalized = name.replace(/\\/g, '/');
-  if (hasUnsafeArchiveEntryName(normalized)) return false;
-  const extension = path.extname(normalized).toLowerCase();
-  return ['.csv', '.json', '.txt'].includes(extension);
-}
-
-function zipBufferFromEntries(entries: ZipRepackEntry[]): Buffer {
-  const localParts: Buffer[] = [];
-  const centralParts: Buffer[] = [];
-  let offset = 0;
-  for (const entry of entries) {
-    const name = Buffer.from(entry.name, 'utf8');
-    const compressed = deflateRawSync(entry.content);
-    const crc = crc32(entry.content);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(ZIP_UTF8_FILENAME_FLAG, 6);
-    local.writeUInt16LE(8, 8);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(compressed.length, 18);
-    local.writeUInt32LE(entry.content.length, 22);
-    local.writeUInt16LE(name.length, 26);
-    local.writeUInt16LE(0, 28);
-    localParts.push(local, name, compressed);
-
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
-    central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(ZIP_UTF8_FILENAME_FLAG, 8);
-    central.writeUInt16LE(8, 10);
-    central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(compressed.length, 20);
-    central.writeUInt32LE(entry.content.length, 24);
-    central.writeUInt16LE(name.length, 28);
-    central.writeUInt16LE(0, 30);
-    central.writeUInt16LE(0, 32);
-    central.writeUInt16LE(0, 34);
-    central.writeUInt16LE(0, 36);
-    central.writeUInt32LE(0, 38);
-    central.writeUInt32LE(offset, 42);
-    centralParts.push(central, name);
-    offset += local.length + name.length + compressed.length;
-  }
-  const centralOffset = offset;
-  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(0, 4);
-  eocd.writeUInt16LE(0, 6);
-  eocd.writeUInt16LE(entries.length, 8);
-  eocd.writeUInt16LE(entries.length, 10);
-  eocd.writeUInt32LE(centralSize, 12);
-  eocd.writeUInt32LE(centralOffset, 16);
-  eocd.writeUInt16LE(0, 20);
-  return Buffer.concat([...localParts, ...centralParts, eocd]);
-}
-
-function crc32(buffer: Buffer): number {
-  let crc = ~0;
-  for (const byte of buffer) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) {
-      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-    }
-  }
-  return ~crc >>> 0;
+interface PreparedArtifact {
+  path: string;
+  trustedContent: boolean;
 }
 
 async function hasSafePublicArtifactContent(skillId: StoredJob['skillId'], filePath: string): Promise<boolean> {
@@ -867,6 +756,8 @@ function hasUnsafeArchiveEntryName(name: string): boolean {
 }
 
 function hasSensitivePublicText(value: string): boolean {
+  if (!/[=]/.test(value) || !/(?:AGENT|Y3|VITE|TOKEN|SECRET|PASSWORD|API_KEY)/i.test(value)) return false;
+  SENSITIVE_ENV_ASSIGNMENT_PATTERN.lastIndex = 0;
   return SENSITIVE_ENV_ASSIGNMENT_PATTERN.test(value);
 }
 
@@ -988,10 +879,10 @@ async function buildArtifacts(job: StoredJob, files: string[]): Promise<Internal
     if (!safe) continue;
     const stat = await fs.stat(safe);
     if (!stat.isFile()) continue;
-    const publicSafe = await preparePublicArtifact(job.skillId, safe, job.outputDir);
-    if (!publicSafe) continue;
-    const publicStat = await fs.stat(publicSafe);
-    const relativePath = path.relative(job.outputDir, publicSafe);
+    const prepared = await preparePublicArtifact(job.skillId, safe, job.outputDir);
+    if (!prepared) continue;
+    const publicStat = await fs.stat(prepared.path);
+    const relativePath = path.relative(job.outputDir, prepared.path);
     const candidate: InternalArtifact = {
       id: `artifact-${artifacts.length + 1}`,
       relativePath,
@@ -999,7 +890,7 @@ async function buildArtifacts(job: StoredJob, files: string[]): Promise<Internal
       sizeBytes: publicStat.size,
       downloadUrl: `/api/jobs/${encodeURIComponent(job.id)}/artifacts/artifact-${artifacts.length + 1}`,
     };
-    if (!isSafePublicArtifact(job.skillId, candidate) || !await hasSafePublicArtifactContent(job.skillId, publicSafe)) continue;
+    if (!isSafePublicArtifact(job.skillId, candidate) || (!prepared.trustedContent && !await hasSafePublicArtifactContent(job.skillId, prepared.path))) continue;
     const id = candidate.id;
     artifacts.push({ ...candidate, id, downloadUrl: `/api/jobs/${encodeURIComponent(job.id)}/artifacts/${encodeURIComponent(id)}` });
     if (job.skillId === 'fetch-archive-changes' || job.skillId === 'fetch-mismatch-logs') break;
