@@ -34,6 +34,18 @@ describe('AgentJobCenter beta warning copy contract', () => {
     expect(source).not.toContain('disabled={Boolean(submitDisabledReason)}');
   });
 
+  it('shows a first-load connection state before rendering true empty task data', () => {
+    const source = readFileSync(new URL('./AgentJobCenter.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('bootstrapLoading');
+    expect(source).toContain('正在加载任务能力');
+    expect(source).toContain('正在同步任务列表');
+    expect(source).toContain('正在连接任务服务，连接成功后会显示任务详情');
+    expect(source).toContain('AgentJobLoadingState');
+    expect(source).toContain('aria-label="正在连接任务服务"');
+    expect(source).toContain('disabled={bootstrapLoading}');
+  });
+
   it('uses owner-scoped artifact download URLs with a desktop-safe click handoff', () => {
     const source = readFileSync(new URL('./AgentJobCenter.tsx', import.meta.url), 'utf8');
 

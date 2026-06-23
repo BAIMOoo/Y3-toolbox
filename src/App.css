@@ -2183,7 +2183,8 @@ button {
 }
 
 .agent-job-list-empty,
-.agent-job-detail-empty {
+.agent-job-detail-empty,
+.agent-job-loading-state {
   display: grid;
   min-height: 120px;
   place-items: center;
@@ -2191,6 +2192,10 @@ button {
   text-align: center;
   border: 1px dashed var(--border);
   background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+}
+
+.agent-job-loading-state {
+  gap: 10px;
 }
 
 .agent-job-row {
