@@ -9,6 +9,7 @@ import { filterUserVisibleJobEvents } from './eventVisibility';
 import { getAgentQueueStatus, getAgentRunnerStatus, hasActiveAgentJobs, isTerminalAgentJob, refreshActiveAgentJobs } from './agentJobCenterStatus';
 import { handleAgentArtifactDownloadClick } from './artifactDownload';
 import { formatArtifactSize } from './formatArtifactSize';
+import { formatAgentJobListTime } from './formatAgentJobListTime';
 import { createKkresStageRequestId, subscribeToActiveStageProgress, type StageProgressState } from './stageProgress';
 import type { AgentArtifactDownloadProgress } from '../types/electron';
 
@@ -422,13 +423,6 @@ function getAgentJobStatusView(job: AgentJobSummary): { label: string; color: 's
       return { label: '重试', color: 'error' };
   }
 }
-
-function formatAgentJobListTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-}
-
 
 interface KkresImagePathFieldProps {
   label: string;
