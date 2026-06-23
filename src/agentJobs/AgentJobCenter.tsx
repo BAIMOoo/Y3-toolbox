@@ -25,6 +25,7 @@ export function AgentJobCenter() {
   const [jobEventMeta, setJobEventMeta] = useState<Record<string, Pick<AgentJobEventsResponse, 'latestEventId' | 'truncatedBefore'>>>({});
   const [health, setHealth] = useState<AgentHealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [bootstrapLoading, setBootstrapLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [stageProgress, setStageProgress] = useState<StageProgressState | null>(null);
   const [artifactDownloadProgress, setArtifactDownloadProgress] = useState<AgentArtifactDownloadProgress | null>(null);
@@ -41,8 +42,8 @@ export function AgentJobCenter() {
   const visibleActiveJobEvents = useMemo(() => filterUserVisibleJobEvents(activeJobEvents), [activeJobEvents]);
   const activeJobEventMeta = activeJob ? jobEventMeta[activeJob.id] : undefined;
   const activeJobDownloadArtifacts = useMemo(() => (activeJob ? visibleDownloadArtifacts(activeJob) : []), [activeJob]);
-  const serviceStatus = useMemo(() => getAgentRunnerStatus(health), [health]);
-  const queueStatus = useMemo(() => getAgentQueueStatus(health), [health]);
+  const serviceStatus = useMemo(() => getAgentRunnerStatus(health, { loading: bootstrapLoading }), [bootstrapLoading, health]);
+  const queueStatus = useMemo(() => getAgentQueueStatus(health, { loading: bootstrapLoading }), [bootstrapLoading, health]);
   const refreshHealth = useCallback(async () => {
     const healthPayload = await fetchAgentHealth();
     setHealth(healthPayload);
@@ -54,11 +55,13 @@ export function AgentJobCenter() {
     setSkills(skillPayload.skills);
     setHealth(healthPayload);
     setJobs(jobPayload.jobs);
-    if (!selectedSkillId && skillPayload.skills[0]) setSelectedSkillId(skillPayload.skills[0].id);
-  }, [selectedSkillId]);
+  }, []);
 
   useEffect(() => {
-    void refresh().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    setBootstrapLoading(true);
+    void refresh()
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setBootstrapLoading(false));
   }, [refresh]);
 
 
@@ -228,6 +231,7 @@ export function AgentJobCenter() {
           <p>选择任务、提交参数，并在这里查看实时进度与下载结果。</p>
         </div>
         <div className="agent-job-topbar__status" aria-label="任务服务和队列状态">
+          {bootstrapLoading && <span className="inline-loading-spinner" aria-label="正在连接任务服务" />}
           <Tag color={serviceStatus.color}>{serviceStatus.label}</Tag>
           <Tag color={queueStatus.color} title={queueStatus.title}>{queueStatus.label}</Tag>
         </div>
@@ -245,19 +249,23 @@ export function AgentJobCenter() {
       <div className="agent-job-workspace">
         <Card title="提交任务" className="agent-job-card agent-job-submit-card">
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Select
-              className="agent-skill-select"
-              popupClassName="agent-skill-select-popup"
-              popupMatchSelectWidth={320}
-              style={{ width: '100%' }}
-              value={selectedSkill?.id}
-              onChange={(value) => {
-                setSelectedSkillId(value);
-                setFormValues(getAgentParamDefaults(value));
-              }}
-              options={skills.map((skill) => ({ value: skill.id, label: skill.label }))}
-            />
-            {selectedSkill && <Typography.Paragraph type="secondary">{selectedSkill.description}</Typography.Paragraph>}
+            {bootstrapLoading ? (
+              <AgentJobLoadingState message="正在加载任务能力…" />
+            ) : (
+              <Select
+                className="agent-skill-select"
+                popupClassName="agent-skill-select-popup"
+                popupMatchSelectWidth={320}
+                style={{ width: '100%' }}
+                value={selectedSkill?.id}
+                onChange={(value) => {
+                  setSelectedSkillId(value);
+                  setFormValues(getAgentParamDefaults(value));
+                }}
+                options={skills.map((skill) => ({ value: skill.id, label: skill.label }))}
+              />
+            )}
+            {selectedSkill && !bootstrapLoading && <Typography.Paragraph type="secondary">{selectedSkill.description}</Typography.Paragraph>}
             {selectedSkill?.fields.map((field) => {
               if (selectedSkill.id === 'export-kkres-image' && field.name === 'images') {
                 return (
@@ -300,7 +308,7 @@ export function AgentJobCenter() {
                 description={KKRES_IMPORT_SAFETY_DESCRIPTION}
               />
             )}
-            <Button type="primary" loading={loading} onClick={() => void submit()}>提交任务</Button>
+            <Button type="primary" loading={loading} disabled={bootstrapLoading} onClick={() => void submit()}>{bootstrapLoading ? '等待连接' : '提交任务'}</Button>
           </Space>
         </Card>
 
@@ -309,7 +317,9 @@ export function AgentJobCenter() {
           className="agent-job-card agent-job-list-card"
           extra={<Typography.Text type="secondary">{jobs.length} 个</Typography.Text>}
         >
-          {jobs.length === 0 ? (
+          {bootstrapLoading ? (
+            <AgentJobLoadingState message="正在同步任务列表…" />
+          ) : jobs.length === 0 ? (
             <div className="agent-job-list-empty">
               <Typography.Text type="secondary">暂无任务。提交任务后会自动出现在这里。</Typography.Text>
             </div>
@@ -330,7 +340,9 @@ export function AgentJobCenter() {
         </Card>
 
         <Card title="任务详情" className="agent-job-card agent-job-detail-card">
-          {activeJob ? (
+          {bootstrapLoading ? (
+            <AgentJobLoadingState message="正在连接任务服务，连接成功后会显示任务详情。" />
+          ) : activeJob ? (
             <div className="agent-job-detail">
               <h3>{activeJob.skillLabel}</h3>
               <p className="agent-job-summary">{activeJob.summary}</p>
@@ -387,6 +399,14 @@ export function AgentJobCenter() {
         </Card>
       </div>
     </section>
+  );
+}
+
+function AgentJobLoadingState({ message: loadingMessage }: { message: string }) {
+  return (
+    <div className="agent-job-loading-state" role="status" aria-live="polite">
+      <Typography.Text type="secondary">{loadingMessage}</Typography.Text>
+    </div>
   );
 }
 

@@ -17,6 +17,10 @@ const baseHealth: AgentHealthResponse = {
 };
 
 describe('agent task service status view', () => {
+  it('reports an in-progress connection while initial health is loading', () => {
+    expect(getAgentRunnerStatus(null, { loading: true })).toEqual({ label: '正在连接任务服务', color: 'processing' });
+  });
+
   it('reports unavailable when health has not loaded', () => {
     expect(getAgentRunnerStatus(null)).toEqual({ label: '任务服务未连接', color: 'error' });
   });
@@ -44,6 +48,14 @@ describe('agent task service status view', () => {
 
 
 describe('agent queue status view', () => {
+  it('reports queue sync while initial health is loading', () => {
+    expect(getAgentQueueStatus(null, { loading: true })).toEqual({
+      label: '正在同步队列状态',
+      color: 'warning',
+      title: '正在等待任务服务首次响应',
+    });
+  });
+
   it('summarizes queue counts for the sticky topbar', () => {
     expect(getAgentQueueStatus({
       ...baseHealth,
