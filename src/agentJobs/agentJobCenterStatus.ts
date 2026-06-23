@@ -2,7 +2,7 @@ import type { AgentHealthResponse, AgentJobSummary } from './types';
 
 const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed']);
 
-export type AgentRunnerStatusTone = 'success' | 'warning' | 'error';
+export type AgentRunnerStatusTone = 'success' | 'warning' | 'error' | 'processing';
 export type AgentQueueStatusTone = 'success' | 'warning' | 'error';
 
 export interface AgentRunnerStatusView {
@@ -16,7 +16,12 @@ export interface AgentQueueStatusView {
   title: string;
 }
 
-export function getAgentRunnerStatus(health: AgentHealthResponse | null): AgentRunnerStatusView {
+interface AgentStatusOptions {
+  loading?: boolean;
+}
+
+export function getAgentRunnerStatus(health: AgentHealthResponse | null, options: AgentStatusOptions = {}): AgentRunnerStatusView {
+  if (!health && options.loading) return { label: '正在连接任务服务', color: 'processing' };
   if (!health) return { label: '任务服务未连接', color: 'error' };
   if (health.queue.submissionsDisabled) return { label: '任务服务维护中', color: 'error' };
   if (health.ready) return { label: '任务服务可用', color: 'success' };
@@ -24,7 +29,8 @@ export function getAgentRunnerStatus(health: AgentHealthResponse | null): AgentR
   return { label: '任务服务未就绪', color: 'error' };
 }
 
-export function getAgentQueueStatus(health: AgentHealthResponse | null): AgentQueueStatusView {
+export function getAgentQueueStatus(health: AgentHealthResponse | null, options: AgentStatusOptions = {}): AgentQueueStatusView {
+  if (!health && options.loading) return { label: '正在同步队列状态', color: 'warning', title: '正在等待任务服务首次响应' };
   if (!health) return { label: '队列状态未知', color: 'warning', title: '等待任务服务连接' };
   const { queue } = health;
   if (queue.submissionsDisabled) {
