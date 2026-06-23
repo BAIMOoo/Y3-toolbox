@@ -12,6 +12,8 @@ import { formatArtifactSize } from './formatArtifactSize';
 import { createKkresStageRequestId, subscribeToActiveStageProgress, type StageProgressState } from './stageProgress';
 import type { AgentArtifactDownloadProgress } from '../types/electron';
 
+const KKRES_IMPORT_SAFETY_TITLE = '导入前安全提醒';
+const KKRES_IMPORT_SAFETY_DESCRIPTION = '不要直接把生成的 KKRes 导入正式项目；请先导入测试项目确认资源管理器和 UI 编辑器显示正常，导入正式项目前请先做好项目备份。';
 
 export function AgentJobCenter() {
   const [skills, setSkills] = useState<AgentSkillDefinition[]>([]);
@@ -289,6 +291,15 @@ export function AgentJobCenter() {
               );
             })}
             {stageProgress && <KkresStageProgressPanel progress={stageProgress} />}
+            {selectedSkill?.id === 'export-kkres-image' && (
+              <Alert
+                className="kkres-import-safety-alert"
+                type="warning"
+                showIcon
+                message={KKRES_IMPORT_SAFETY_TITLE}
+                description={KKRES_IMPORT_SAFETY_DESCRIPTION}
+              />
+            )}
             <Button type="primary" loading={loading} onClick={() => void submit()}>提交任务</Button>
           </Space>
         </Card>
