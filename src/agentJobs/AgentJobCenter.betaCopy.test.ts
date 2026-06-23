@@ -64,5 +64,8 @@ describe('AgentJobCenter beta warning copy contract', () => {
     expect(source).toContain('kkres-image-textarea-drop-target');
     expect(source).toContain('subscribeToActiveStageProgress');
     expect(source).toContain('KkresStageProgressPanel');
+    expect(source).toContain('导入前安全提醒');
+    expect(source).toContain('不要直接把生成的 KKRes 导入正式项目');
+    expect(source).toContain('导入正式项目前请先做好项目备份');
   });
 });
