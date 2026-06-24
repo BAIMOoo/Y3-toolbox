@@ -62,6 +62,48 @@ describe('parseArchiveDiff', () => {
     expect(parseArchiveDiff('')).toEqual([]);
   });
 
+  describe('platform limit metadata', () => {
+    it('keeps bracketed dv/max metadata from splitting into fake archive keys', () => {
+      const changes = parseArchiveDiff(
+        '|82=225014>>>225015[dv:14114>>18559|max:99999999]|244-1=16078>>16079>>>1>>16079',
+      );
+
+      expect(changes).toHaveLength(2);
+      expect(changes.map((change) => change.key)).toEqual(['82', '244-1']);
+      expect(changes.find((change) => change.key === 'max:99999999]')).toBeUndefined();
+    });
+
+    it('strips CheckMapArchiveDiff day-value/max metadata from snapshot values', () => {
+      const changes = parseArchiveDiff('|82=225014>>>225015[dv:14114>>18559|max:99999999]');
+
+      expect(changes[0]).toEqual({
+        key: '82',
+        keyParts: ['82'],
+        rootKey: '82',
+        oldValue: '225014',
+        newValue: '225015',
+        changeType: 'update',
+        limitMetadata: {
+          dayValueOld: '14114',
+          dayValueNew: '18559',
+          maxValue: '99999999',
+        },
+      });
+    });
+
+    it('supports other platform max limits without treating metadata as value text', () => {
+      const changes = parseArchiveDiff('|143=2638>>>2640[dv:400>>402|max:99999]');
+
+      expect(changes[0].oldValue).toBe('2638');
+      expect(changes[0].newValue).toBe('2640');
+      expect(changes[0].limitMetadata).toEqual({
+        dayValueOld: '400',
+        dayValueNew: '402',
+        maxValue: '99999',
+      });
+    });
+  });
+
   describe('new format with op_type and final_value', () => {
     it('should parse new format: key=old>>new>>>op_type>>final_value', () => {
       const changes = parseArchiveDiff('|74-20007-物品名称=考古币>>考古币>>>1>>考古币');

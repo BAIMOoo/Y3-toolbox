@@ -1,5 +1,11 @@
 import type { ArchiveChange, ChangeType } from '../types';
 
+interface ArchiveLimitMetadata {
+  dayValueOld: string;
+  dayValueNew: string;
+  maxValue: string;
+}
+
 export function extractArchiveDiff(rawText: string): string | null {
   const marker = '"archive_diff":"';
   const start = rawText.indexOf(marker);
@@ -17,9 +23,55 @@ function getChangeType(oldValue: string, newValue: string): ChangeType {
   return 'update';
 }
 
+/**
+ * Split archive_diff entries while preserving platform metadata blocks.
+ *
+ * The platform CheckMapArchiveDiff output can append limit metadata to a value:
+ *   key=old>>>new[dv:oldDayValue>>newDayValue|max:limit]
+ *
+ * The pipe inside this bracket is part of the metadata, not an archive_diff
+ * entry delimiter. A plain `diffStr.split('|')` would incorrectly produce a
+ * fake key such as `max:99999999]`.
+ */
+function splitArchiveDiffEntries(diffStr: string): string[] {
+  const entries: string[] = [];
+  let current = '';
+  let bracketDepth = 0;
+
+  for (const char of diffStr) {
+    if (char === '|' && bracketDepth === 0) {
+      if (current.length > 0) entries.push(current);
+      current = '';
+      continue;
+    }
+
+    current += char;
+
+    if (char === '[') bracketDepth += 1;
+    else if (char === ']' && bracketDepth > 0) bracketDepth -= 1;
+  }
+
+  if (current.length > 0) entries.push(current);
+  return entries;
+}
+
+function parseValueLimitMetadata(value: string): { value: string; metadata?: ArchiveLimitMetadata } {
+  const metadataMatch = value.match(/\[dv:([^>\]]*)>>([^|\]]*)\|max:([^\]]*)\]$/);
+  if (!metadataMatch) return { value };
+
+  return {
+    value: value.slice(0, metadataMatch.index),
+    metadata: {
+      dayValueOld: metadataMatch[1],
+      dayValueNew: metadataMatch[2],
+      maxValue: metadataMatch[3],
+    },
+  };
+}
+
 export function parseArchiveDiff(diffStr: string): ArchiveChange[] {
   if (!diffStr || diffStr.trim() === '') return [];
-  const entries = diffStr.split('|').filter((s) => s.length > 0);
+  const entries = splitArchiveDiffEntries(diffStr).filter((s) => s.length > 0);
   return entries.map((entry) => {
     const eqIndex = entry.indexOf('=');
     if (eqIndex === -1) {
@@ -56,7 +108,21 @@ export function parseArchiveDiff(diffStr: string): ArchiveChange[] {
       }
     }
 
+    const oldParsed = parseValueLimitMetadata(oldValue);
+    const newParsed = parseValueLimitMetadata(newValue);
+    oldValue = oldParsed.value;
+    newValue = newParsed.value;
+    const limitMetadata = newParsed.metadata ?? oldParsed.metadata;
+
     const keyParts = key.split('-');
-    return { key, keyParts, rootKey: keyParts[0], oldValue, newValue, changeType: getChangeType(oldValue, newValue) };
+    return {
+      key,
+      keyParts,
+      rootKey: keyParts[0],
+      oldValue,
+      newValue,
+      changeType: getChangeType(oldValue, newValue),
+      ...(limitMetadata ? { limitMetadata } : {}),
+    };
   });
 }

@@ -17,6 +17,20 @@ export interface ArchiveChange {
   newValue: string;
   /** 变动类型 */
   changeType: ChangeType;
+  /**
+   * 平台存档限制元信息。
+   *
+   * 编辑器/平台的 CheckMapArchiveDiff 会把带限制的存档槽格式化为：
+   *   key=old>>>new[dv:oldDayValue>>newDayValue|max:limit]
+   * 其中 dv 对应 PlayerMapArchiveData.day_value：当前限制周期内已经累计的用量。
+   * max 是本次校验使用的当前上限；周期可能是每日或每周，取决于该存档键的
+   * max_value_limit_type 配置，日志本身不包含这个类型。
+   */
+  limitMetadata?: {
+    dayValueOld: string;
+    dayValueNew: string;
+    maxValue: string;
+  };
 }
 
 /** 时间节点 — 一条或多条同时间戳的日志行合并后的变动集合 */
