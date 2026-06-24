@@ -1,6 +1,6 @@
 // src/components/ChangeList.tsx
 import React from 'react';
-import { Table } from 'antd';
+import { Table, Tooltip } from 'antd';
 import type { ArchiveChange, TimePoint } from '../types';
 
 interface ChangeListProps {
@@ -15,6 +15,12 @@ const CHANGE_TYPE_CONFIG = {
   delete: { label: '删除', color: 'var(--color-delete)', bg: 'var(--color-delete-bg)' },
   noop: { label: '未变', color: 'var(--text-muted)', bg: 'rgba(148, 163, 184, 0.15)' },
 };
+
+
+function formatLimitMetadata(metadata: ArchiveChange['limitMetadata']): string {
+  if (!metadata) return '';
+  return `当前存档本周期内累计获得值已经从 ${metadata.dayValueOld} 变成了 ${metadata.dayValueNew}；本周期允许累计的上限是 ${metadata.maxValue}`;
+}
 
 export const ChangeList: React.FC<ChangeListProps> = ({ timePoint, selectedKey, onSelectKey }) => {
   if (!timePoint) {
@@ -78,6 +84,21 @@ export const ChangeList: React.FC<ChangeListProps> = ({ timePoint, selectedKey, 
         <span style={{ color: v === 'nil' ? 'var(--text-muted)' : 'var(--color-create)', fontSize: 11 }}>
           {v}
         </span>
+      ),
+    },
+    {
+      title: '限制',
+      dataIndex: 'limitMetadata',
+      width: 190,
+      ellipsis: true,
+      render: (metadata: ArchiveChange['limitMetadata']) => metadata ? (
+        <Tooltip title={formatLimitMetadata(metadata)} placement="topLeft" styles={{ container: { fontSize: 11 } }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>
+            用量: {metadata.dayValueOld} → {metadata.dayValueNew} / 上限: {metadata.maxValue}
+          </span>
+        </Tooltip>
+      ) : (
+        <span style={{ color: 'var(--text-muted)', opacity: 0.45 }}>—</span>
       ),
     },
   ];

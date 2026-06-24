@@ -1,5 +1,6 @@
 // src/components/DiffView.tsx
 import React, { useRef, useCallback, useMemo, useState } from 'react';
+import { Tooltip } from 'antd';
 import type { Snapshot, ArchiveChange, SnapshotValue, DisplayMode } from '../types';
 import { buildAlignedLines } from '../engine/diffLines';
 import { computeVisibleLines } from '../engine/filterDiffLines';
@@ -66,14 +67,33 @@ function getRightTextColor(type: DiffLine['type']): string {
   }
 }
 
+type LimitMetadata = ArchiveChange['limitMetadata'];
+
+function formatLimitMetadata(metadata: LimitMetadata): string {
+  if (!metadata) return '';
+  return `当前存档本周期内累计获得值已经从 ${metadata.dayValueOld} 变成了 ${metadata.dayValueNew}；本周期允许累计的上限是 ${metadata.maxValue}`;
+}
+
+function renderLimitMetadata(metadata: LimitMetadata): React.ReactNode {
+  if (!metadata) return null;
+  return (
+    <Tooltip title={formatLimitMetadata(metadata)} placement="topLeft" styles={{ container: { fontSize: 11 } }}>
+      <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 10 }}>
+        用量 {metadata.dayValueOld}→{metadata.dayValueNew} / 上限 {metadata.maxValue}
+      </span>
+    </Tooltip>
+  );
+}
+
 /** 渲染单侧行内容 */
 function renderContent(
   content: DiffLineContent | null,
   type: DiffLine['type'],
-  _side: 'left' | 'right',
+  side: 'left' | 'right',
   bgColor: string,
   textColor: string,
   isDeleted: boolean,
+  limitMetadata?: LimitMetadata,
 ): React.ReactNode {
   if (!content) {
     // 占位空行
@@ -140,6 +160,7 @@ function renderContent(
       <span style={{ color: type !== 'unchanged' ? textColor : 'var(--text-primary)' }}>
         {valPart}
       </span>
+      {side === 'right' && !isDeleted && renderLimitMetadata(limitMetadata)}
     </div>
   );
 }
@@ -176,6 +197,13 @@ function renderFoldHeader(
 export const DiffView: React.FC<DiffViewProps> = ({ prevSnapshot, currentSnapshot, changes, highlightKey, displayMode = 'diff' }) => {
   const changedKeys = useMemo(() => new Set(changes.map((c) => c.key)), [changes]);
   const noopKeys = useMemo(() => new Set(changes.filter((c) => c.changeType === 'noop').map((c) => c.key)), [changes]);
+  const limitMetadataByKey = useMemo(() => {
+    const map = new Map<string, NonNullable<ArchiveChange['limitMetadata']>>();
+    for (const change of changes) {
+      if (change.limitMetadata) map.set(change.key, change.limitMetadata);
+    }
+    return map;
+  }, [changes]);
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const isSyncingRef = useRef(false); // 防止循环触发
@@ -333,7 +361,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ prevSnapshot, currentSnapsho
             const textColor = getLeftTextColor(line.type);
             return (
               <div key={`left-${i}`}>
-                {renderContent(line.left, line.type, 'left', bgColor, textColor, false)}
+                {renderContent(line.left, line.type, 'left', bgColor, textColor, false, limitMetadataByKey.get(line.left?.fullKey ?? ''))}
               </div>
             );
           })}
@@ -377,7 +405,7 @@ export const DiffView: React.FC<DiffViewProps> = ({ prevSnapshot, currentSnapsho
             const textColor = getRightTextColor(line.type);
             return (
               <div key={`right-${i}`}>
-                {renderContent(line.right, line.type, 'right', bgColor, textColor, isDeletedGhost)}
+                {renderContent(line.right, line.type, 'right', bgColor, textColor, isDeletedGhost, limitMetadataByKey.get(line.right?.fullKey ?? ''))}
               </div>
             );
           })}
