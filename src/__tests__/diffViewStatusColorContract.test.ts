@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('../components/DiffView.tsx', import.meta.url), 'utf8');
+const changeListSource = readFileSync(new URL('../components/ChangeList.tsx', import.meta.url), 'utf8');
 const statusBarSource = readFileSync(new URL('../components/StatusBar.tsx', import.meta.url), 'utf8');
 
 describe('DiffView status color contract', () => {
@@ -15,6 +16,15 @@ describe('DiffView status color contract', () => {
   it('uses themed Snapshot Compare headers instead of hard-coded dark bars', () => {
     expect(source).not.toContain("background: 'rgba(17, 23, 33, 0.96)'");
     expect(source).toContain("background: 'var(--bg-tertiary)'");
+  });
+
+  it('renders parsed dv/max archive limit metadata in snapshot compare and change list', () => {
+    expect(source).toContain('limitMetadataByKey');
+    expect(source).toContain('用量 {metadata.dayValueOld}→{metadata.dayValueNew} / 上限 {metadata.maxValue}');
+    expect(source).toContain('当前存档本周期内累计获得值已经从 ${metadata.dayValueOld} 变成了 ${metadata.dayValueNew}；本周期允许累计的上限是 ${metadata.maxValue}');
+    expect(changeListSource).toContain("title: '限制'");
+    expect(changeListSource).toContain('用量: {metadata.dayValueOld} → {metadata.dayValueNew} / 上限: {metadata.maxValue}');
+    expect(changeListSource).toContain('当前存档本周期内累计获得值已经从 ${metadata.dayValueOld} 变成了 ${metadata.dayValueNew}；本周期允许累计的上限是 ${metadata.maxValue}');
   });
 
   it('keeps StatusBar badges on the same status token family', () => {
