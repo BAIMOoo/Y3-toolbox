@@ -17,6 +17,8 @@ import { LocalArchiveViewer, type LocalArchiveInitialOpen } from './archiveViewe
 import { AgentJobCenter } from './agentJobs/AgentJobCenter';
 import { classifyOpenFilePath, classifyLocalInput, getDroppedLocalInputs, routeRequiresLocalArchive, shouldSkipRootDropRoute, type OpenFileRoute } from './utils/openFileRouting';
 import { shouldShowDiffContextToolbar } from './utils/diffUiState';
+import { RecoveryPanel } from './recovery/RecoveryPanel';
+import type { Snapshot, SnapshotValue } from './types';
 
 // Error Boundary to catch render crashes
 class ErrorBoundary extends React.Component<
@@ -56,10 +58,26 @@ class ErrorBoundary extends React.Component<
 }
 
 type AppMode = 'diff' | 'local-archive' | 'agent-jobs';
+type DiffWorkspaceMode = 'compare' | 'recovery';
 type UiTone = 'graphite' | 'paper';
 
 const UI_TONE_STORAGE_KEY = 'archive-diff-ui-tone';
 const UI_TONE_RENDER_VERSION = 'icon-tone-switch-v3';
+
+
+const EMPTY_SNAPSHOT: Snapshot = Object.freeze({});
+
+function countSnapshotKeys(obj: Record<string, SnapshotValue>): number {
+  let count = 0;
+  for (const key of Object.keys(obj)) {
+    count++;
+    const val = obj[key];
+    if (typeof val === 'object' && val !== null) {
+      count += countSnapshotKeys(val);
+    }
+  }
+  return count;
+}
 
 const uiToneOptions: Array<{ label: React.ReactNode; value: UiTone; title: string }> = [
   { label: <MoonOutlined aria-hidden="true" />, value: 'graphite', title: '深灰模式' },
@@ -121,6 +139,8 @@ function App() {
     selectedIndex,
     filter,
     fileName,
+    recoveryAid,
+    recoveryAidConflict,
     loading,
     error,
     availableRootKeys,
@@ -137,6 +157,7 @@ function App() {
   } = useArchiveData();
 
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  const [diffWorkspaceMode, setDiffWorkspaceMode] = useState<DiffWorkspaceMode>('compare');
 
   const currentTimePoint = useMemo(() => {
     return timePoints[selectedIndex] ?? null;
@@ -147,23 +168,32 @@ function App() {
     return filteredIndexMap.get(selectedIndex) ?? null;
   }, [filteredIndexMap, selectedIndex]);
 
+  const isRecoveryWorkspace = diffWorkspaceMode === 'recovery';
+
   const prevSnapshot = useMemo(() => {
+    if (isRecoveryWorkspace) return EMPTY_SNAPSHOT;
     return snapshotEngine.getSnapshotAt(selectedIndex - 1);
-  }, [snapshotEngine, selectedIndex]);
+  }, [snapshotEngine, selectedIndex, isRecoveryWorkspace]);
 
   const currentSnapshot = useMemo(() => {
+    if (isRecoveryWorkspace) return EMPTY_SNAPSHOT;
     return snapshotEngine.getSnapshotAt(selectedIndex);
-  }, [snapshotEngine, selectedIndex]);
+  }, [snapshotEngine, selectedIndex, isRecoveryWorkspace]);
 
-  // Filtered snapshots — trim to selected rootKeys for SnapshotView
+  // Filtered snapshots — trim to selected rootKeys for SnapshotView. Recovery view does not render SnapshotView.
   const filteredPrevSnapshot = useMemo(
-    () => filterSnapshot(prevSnapshot, filter.rootKeys),
-    [prevSnapshot, filter.rootKeys],
+    () => (isRecoveryWorkspace ? EMPTY_SNAPSHOT : filterSnapshot(prevSnapshot, filter.rootKeys)),
+    [prevSnapshot, filter.rootKeys, isRecoveryWorkspace],
   );
 
   const filteredCurrentSnapshot = useMemo(
-    () => filterSnapshot(currentSnapshot, filter.rootKeys),
-    [currentSnapshot, filter.rootKeys],
+    () => (isRecoveryWorkspace ? EMPTY_SNAPSHOT : filterSnapshot(currentSnapshot, filter.rootKeys)),
+    [currentSnapshot, filter.rootKeys, isRecoveryWorkspace],
+  );
+
+  const statusBarKeyCount = useMemo(
+    () => (isRecoveryWorkspace ? undefined : countSnapshotKeys(currentSnapshot)),
+    [currentSnapshot, isRecoveryWorkspace],
   );
 
   const changeCounts = useMemo(() => {
@@ -217,6 +247,11 @@ function App() {
   const hasData = timePoints.length > 0;
   const showDiffContextToolbar = shouldShowDiffContextToolbar(hasData);
 
+  const handleDiffFileSelected = useCallback((file: File) => {
+    setDiffWorkspaceMode('compare');
+    loadFile(file);
+  }, [loadFile]);
+
   const openLocalArchiveRoute = useCallback((route: Extract<OpenFileRoute, { kind: 'local-archive-json' | 'local-archive-directory' }>) => {
     diffOpenRequestIdRef.current += 1;
     setShellError(null);
@@ -239,6 +274,7 @@ function App() {
     void window.electronAPI.readFile(route.path).then((result) => {
       if (requestId !== diffOpenRequestIdRef.current) return;
       if (result.success) {
+        setDiffWorkspaceMode('compare');
         loadFromText(result.content, result.fileName);
       } else {
         setShellError(`无法打开文件: ${result.error}`);
@@ -348,17 +384,18 @@ function App() {
         )}
 
         {!showDiffContextToolbar ? (
-          <EmptyState onFileSelected={loadFile} loading={loading} />
+          <EmptyState onFileSelected={handleDiffFileSelected} loading={loading} />
         ) : (
           <>
             <FilterBar
               filter={filter}
               onFilterChange={setFilter}
               availableRootKeys={availableRootKeys}
-              onFileSelected={loadFile}
+              onFileSelected={handleDiffFileSelected}
               loading={loading}
               fileName={fileName}
               onDownloadClean={downloadCleanCsv}
+              onOpenRecovery={() => setDiffWorkspaceMode('recovery')}
             />
 
             <Timeline
@@ -373,31 +410,44 @@ function App() {
               onLast={goToLast}
             />
 
-            <ResizableSplit
-              defaultRatio={0.4}
-              left={
-                <ChangeList
-                  timePoint={filteredCurrentTP}
-                  selectedKey={highlightKey}
-                  onSelectKey={setHighlightKey}
-                />
-              }
-              right={
-                <SnapshotView
-                  prevSnapshot={filteredPrevSnapshot}
-                  currentSnapshot={filteredCurrentSnapshot}
-                  changes={filteredCurrentTP?.changes ?? []}
-                  highlightKey={highlightKey}
-                />
-              }
-            />
+            {isRecoveryWorkspace ? (
+              <RecoveryPanel
+                fileName={fileName}
+                aid={recoveryAid}
+                aidConflict={recoveryAidConflict}
+                timePoints={timePoints}
+                selectedIndex={selectedIndex}
+                view="workspace"
+                onClose={() => setDiffWorkspaceMode('compare')}
+              />
+            ) : (
+              <ResizableSplit
+                defaultRatio={0.4}
+                left={
+                  <ChangeList
+                    timePoint={filteredCurrentTP}
+                    selectedKey={highlightKey}
+                    onSelectKey={setHighlightKey}
+                  />
+                }
+                right={
+                  <SnapshotView
+                    prevSnapshot={filteredPrevSnapshot}
+                    currentSnapshot={filteredCurrentSnapshot}
+                    changes={filteredCurrentTP?.changes ?? []}
+                    highlightKey={highlightKey}
+                  />
+                }
+              />
+            )}
 
             <StatusBar
               fileName={fileName}
               timePointCount={timePoints.length}
               selectedIndex={selectedIndex}
-              currentSnapshot={currentSnapshot}
               currentChanges={changeCounts}
+              keyCount={statusBarKeyCount}
+              showSnapshotStats={!isRecoveryWorkspace}
             />
           </>
         )}

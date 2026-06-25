@@ -2,17 +2,29 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { TimePoint } from '../types';
+import { buildTimelineStats } from './timelineStats';
 
 /** ECharts tooltip formatter 参数类型 */
+interface TimelineDatum {
+  value: [number, number];
+  baseColor: string;
+  _tpIndex: number;
+  _rawCount: number;
+  _createCount: number;
+  _updateCount: number;
+  _deleteCount: number;
+}
+
 interface TooltipParam {
   value: [number, number];
-  data?: { _tpIndex?: number; _rawCount?: number; _createCount?: number; _updateCount?: number; _deleteCount?: number };
+  data?: TimelineDatum & { itemStyle?: unknown };
 }
 
 /** ECharts click 事件参数类型 */
 interface ChartClickParam {
   data?: { _tpIndex?: number };
 }
+
 
 interface TimelineProps {
   timePoints: TimePoint[];
@@ -101,21 +113,6 @@ const SELECTED_LINE = 'rgba(169, 187, 223, 0.52)';
 const COLOR_CREATE = '#84c8a4';
 const COLOR_UPDATE = '#d7b46a';
 const COLOR_DELETE = '#d4868b';
-const COLOR_NONE = '#202837';
-
-/** 根据变动类型比例混合出柱子颜色 */
-function blendChangeColor(createCount: number, updateCount: number, deleteCount: number, total: number): string {
-  if (total === 0) return COLOR_NONE;
-  if (deleteCount / total > 0.6) return COLOR_DELETE;
-  if (createCount / total > 0.6) return COLOR_CREATE;
-  if (updateCount / total > 0.5) return COLOR_UPDATE;
-  // 混合色：以最多的类型为主
-  const max = Math.max(createCount, updateCount, deleteCount);
-  if (max === createCount) return COLOR_CREATE;
-  if (max === deleteCount) return COLOR_DELETE;
-  return COLOR_UPDATE;
-}
-
 // SVG 图标组件
 const IconFirst = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
@@ -159,43 +156,23 @@ export const Timeline: React.FC<TimelineProps> = ({
     [timePoints, filteredIndexMap]
   );
 
+  const timelineStats = useMemo(
+    () => buildTimelineStats(timePoints, filteredIndexMap),
+    [timePoints, filteredIndexMap],
+  );
+
   const option = useMemo(() => {
     if (timePoints.length === 0) return {};
 
-    let maxCount = 0;
-    let minNonZero = Infinity;
-    const counts: number[] = [];
-
-    for (const tp of timePoints) {
-      const filtered = filteredIndexMap.get(tp.index);
-      const count = filtered ? filtered.changes.length : 0;
-      counts.push(count);
-      if (count > maxCount) maxCount = count;
-      if (count > 0 && count < minNonZero) minNonZero = count;
-    }
-
-    const useLogAxis = maxCount > 0 && minNonZero < Infinity && maxCount / minNonZero > 10;
-
-    const data = timePoints.map((tp) => {
-      const filtered = filteredIndexMap.get(tp.index);
-      const rawCount = filtered ? filtered.changes.length : 0;
-      const isSelected = tp.index === selectedIndex;
-
-      // 统计各类变动数量
-      const createCount = filtered ? filtered.changes.filter(c => c.changeType === 'create').length : 0;
-      const updateCount = filtered ? filtered.changes.filter(c => c.changeType === 'update').length : 0;
-      const deleteCount = filtered ? filtered.changes.filter(c => c.changeType === 'delete').length : 0;
-
-      const barColor = isSelected
-        ? SELECTED_COLOR
-        : blendChangeColor(createCount, updateCount, deleteCount, rawCount);
-
-      const displayCount = useLogAxis ? (rawCount === 0 ? 0.5 : rawCount) : rawCount;
+    const { useLogAxis } = timelineStats;
+    const data = timelineStats.data.map((datum) => {
+      const isSelected = datum._tpIndex === selectedIndex;
+      const rawCount = datum._rawCount;
 
       return {
-        value: [tp.timestamp.getTime(), displayCount],
+        ...datum,
         itemStyle: {
-          color: barColor,
+          color: isSelected ? SELECTED_COLOR : datum.baseColor,
           opacity: isSelected ? 0.95 : rawCount > 0 ? 0.62 : 0.16,
           borderRadius: isSelected ? [3, 3, 0, 0] : [2, 2, 0, 0],
           shadowColor: isSelected ? SELECTED_GLOW : 'transparent',
@@ -208,11 +185,6 @@ export const Timeline: React.FC<TimelineProps> = ({
             shadowBlur: isSelected ? 6 : 0,
           },
         },
-        _tpIndex: tp.index,
-        _rawCount: rawCount,
-        _createCount: createCount,
-        _updateCount: updateCount,
-        _deleteCount: deleteCount,
       };
     });
 
@@ -249,8 +221,8 @@ export const Timeline: React.FC<TimelineProps> = ({
             coord: [
               selectedTP.timestamp.getTime(),
               useLogAxis
-                ? (counts[selectedIndex] === 0 ? 0.5 : counts[selectedIndex])
-                : counts[selectedIndex],
+                ? (timelineStats.counts[selectedIndex] === 0 ? 0.5 : timelineStats.counts[selectedIndex])
+                : timelineStats.counts[selectedIndex],
             ],
             symbol: 'triangle',
             symbolSize: [10, 6],
@@ -372,7 +344,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       animationDuration: prefersReducedMotion ? 0 : 180,
       animationEasing: 'cubicOut',
     };
-  }, [timePoints, filteredIndexMap, selectedIndex, prefersReducedMotion]);
+  }, [timePoints, timelineStats, selectedIndex, prefersReducedMotion]);
 
   const onEvents = useMemo(
     () => ({
@@ -393,15 +365,16 @@ export const Timeline: React.FC<TimelineProps> = ({
     return null;
   }
 
-  const totalChanges = filteredTimePoints.reduce((sum, tp) => sum + tp.changes.length, 0);
+  const totalChanges = timelineStats.totalChanges;
   const selectedTP = timePoints[selectedIndex];
-  const selectedFilteredTP = filteredIndexMap.get(selectedIndex);
-  const selectedChangeCount = selectedFilteredTP?.changes.length ?? 0;
+  const selectedStats = timelineStats.byIndex.get(selectedIndex);
+  const selectedChangeCount = selectedStats?.rawCount ?? 0;
 
-  // 各类变动统计
-  const selectedCreateCount = selectedFilteredTP?.changes.filter(c => c.changeType === 'create').length ?? 0;
-  const selectedUpdateCount = selectedFilteredTP?.changes.filter(c => c.changeType === 'update').length ?? 0;
-  const selectedDeleteCount = selectedFilteredTP?.changes.filter(c => c.changeType === 'delete').length ?? 0;
+  const selectedChangeCounts = {
+    createCount: selectedStats?.createCount ?? 0,
+    updateCount: selectedStats?.updateCount ?? 0,
+    deleteCount: selectedStats?.deleteCount ?? 0,
+  };
 
   // 进度百分比
   const progress =
@@ -465,14 +438,14 @@ export const Timeline: React.FC<TimelineProps> = ({
           </span>
           {selectedChangeCount > 0 && (
             <div className="timeline-change-badges">
-              {selectedCreateCount > 0 && (
-                <span className="timeline-badge timeline-badge--create">+{selectedCreateCount}</span>
+              {selectedChangeCounts.createCount > 0 && (
+                <span className="timeline-badge timeline-badge--create">+{selectedChangeCounts.createCount}</span>
               )}
-              {selectedUpdateCount > 0 && (
-                <span className="timeline-badge timeline-badge--update">~{selectedUpdateCount}</span>
+              {selectedChangeCounts.updateCount > 0 && (
+                <span className="timeline-badge timeline-badge--update">~{selectedChangeCounts.updateCount}</span>
               )}
-              {selectedDeleteCount > 0 && (
-                <span className="timeline-badge timeline-badge--delete">-{selectedDeleteCount}</span>
+              {selectedChangeCounts.deleteCount > 0 && (
+                <span className="timeline-badge timeline-badge--delete">-{selectedChangeCounts.deleteCount}</span>
               )}
             </div>
           )}

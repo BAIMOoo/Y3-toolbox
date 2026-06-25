@@ -41,6 +41,14 @@ describe('parseCsvText', () => {
       expect(result[0].isClean).toBe(true);
     });
 
+    it('preserves aid from cleaned archive_diff exports for recovery provenance', () => {
+      const csv = `aid,nickname,log_time,archive_diff
+30344223,player,2026-05-14 00:00:07,|100=1>>>2`;
+      const result = parseCsvText(csv);
+      expect(result).toHaveLength(1);
+      expect(result[0].aid).toBe('30344223');
+    });
+
     it('should handle cleaned CSV with multiple rows', () => {
       const csv = `日志时间,archive_diff
 2026-03-19 13:00:00.000,|50=10>>>20
@@ -79,6 +87,14 @@ describe('parseCsvText', () => {
       expect(result).toHaveLength(1);
       expect(result[0].timestamp).toBe('2026-04-09 18:08:00');
       expect(result[0].rawText).toBe('|90-2=1>>>2|');
+    });
+
+    it('preserves aid from raw MapArchiveUpload JSON for recovery provenance', () => {
+      const csv = `日志时间,日志原文
+2026-04-09 16:14:26.000,"Apr  9 16:14:26 up5-prod UP5_GameStatistic: [2026-04-09 16:14:26 +0800][MapArchiveUpload],{""aid"":""30344224"",""archive_diff"":""|89-1=nil>>>100|""}"`;
+      const result = parseCsvText(csv);
+      expect(result).toHaveLength(1);
+      expect(result[0].aid).toBe('30344224');
     });
   });
 

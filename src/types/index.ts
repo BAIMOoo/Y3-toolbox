@@ -57,6 +57,8 @@ export type Snapshot = SnapshotNode;
 /** CSV 原始行 */
 export interface RawLogRow {
   timestamp: string;
+  /** Player aid when supplied by a parsed CSV column or raw-log metadata. */
+  aid?: string;
   /** For clean format: the archive_diff string directly. For raw format: also cleaned to diff string by csvParser. */
   rawText: string;
   /** Whether rawText is already a clean archive_diff string (vs. full syslog line) */

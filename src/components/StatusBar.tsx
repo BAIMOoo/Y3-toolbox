@@ -1,37 +1,25 @@
 // src/components/StatusBar.tsx
-import React, { useMemo } from 'react';
-import type { Snapshot, SnapshotValue } from '../types';
+import React from 'react';
 
 interface StatusBarProps {
   fileName: string | null;
   timePointCount: number;
   selectedIndex: number;
-  currentSnapshot: Snapshot;
   currentChanges: { creates: number; updates: number; deletes: number; noops: number };
-}
-
-function countKeys(obj: Record<string, SnapshotValue>): number {
-  let count = 0;
-  for (const key of Object.keys(obj)) {
-    count++;
-    const val = obj[key];
-    if (typeof val === 'object' && val !== null) {
-      count += countKeys(val);
-    }
-  }
-  return count;
+  /** Explicit snapshot key total supplied by the parent. Omitted when stats should not be shown. */
+  keyCount?: number;
+  /** Controls whether snapshot-specific stats are rendered. Defaults to true for loaded files. */
+  showSnapshotStats?: boolean;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
   fileName,
   timePointCount,
   selectedIndex,
-  currentSnapshot,
   currentChanges,
+  keyCount,
+  showSnapshotStats = true,
 }) => {
-  // memoize 递归计算
-  const keyCount = useMemo(() => countKeys(currentSnapshot), [currentSnapshot]);
-
   return (
     <div
       style={{
@@ -53,7 +41,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             <span style={{ padding: '0 8px 0 0' }}>{fileName}</span>
             <span style={{ borderLeft: '1px solid var(--border)', padding: '0 8px' }}>{timePointCount} 节点</span>
             <span style={{ borderLeft: '1px solid var(--border)', padding: '0 8px' }}>#{selectedIndex + 1} / {timePointCount}</span>
-            <span style={{ borderLeft: '1px solid var(--border)', padding: '0 8px' }}>存档键 {keyCount}</span>
+            {showSnapshotStats && keyCount !== undefined && (
+              <span style={{ borderLeft: '1px solid var(--border)', padding: '0 8px' }}>存档键 {keyCount}</span>
+            )}
           </>
         ) : (
           <span>未加载文件</span>
