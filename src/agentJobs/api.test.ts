@@ -60,7 +60,7 @@ describe('agent job API transport', () => {
     expect(agentServiceRequest).toHaveBeenCalledWith({
       path: '/api/jobs',
       method: 'POST',
-      body: { skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, ownerToken: 'owner-token-0001' },
+      body: { skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6', ownerToken: 'owner-token-0001' },
     });
   });
 

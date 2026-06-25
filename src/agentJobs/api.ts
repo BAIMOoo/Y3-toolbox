@@ -1,4 +1,5 @@
 import type { AgentHealthResponse, AgentJobEventsResponse, AgentJobSummary, AgentSkillDefinition, AgentSubmitRequest } from './types';
+import { Y3_TOOLBOX_CLIENT_VERSION } from './agentCompatibility';
 
 const DEFAULT_SERVICE_URL = '/api';
 const ELECTRON_DEFAULT_SERVICE_URL = 'http://127.0.0.1:8790';
@@ -107,5 +108,5 @@ export function fetchAgentJobEvents(jobId: string, after?: number): Promise<Agen
 }
 
 export function submitAgentJob(request: AgentSubmitRequest): Promise<{ job: AgentJobSummary }> {
-  return requestJson('/api/jobs', { method: 'POST', body: JSON.stringify({ ...request, ownerToken: getAgentOwnerToken() }) });
+  return requestJson('/api/jobs', { method: 'POST', body: JSON.stringify({ ...request, clientVersion: Y3_TOOLBOX_CLIENT_VERSION, ownerToken: getAgentOwnerToken() }) });
 }

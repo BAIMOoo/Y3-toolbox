@@ -10,6 +10,18 @@ on:
         description: 'Tag/name to publish when running manually (for example v0.1.0)'
         required: true
         type: string
+      backend_version:
+        description: 'Backend semver for /api/health.release (x.y.z)'
+        required: true
+        type: string
+      minimum_client_version:
+        description: 'Minimum supported client semver for public submissions (x.y.z)'
+        required: true
+        type: string
+      supported_client_range:
+        description: 'Supported client range, for example >=0.1.6 or 0.1.6 - 0.1.8'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -49,6 +61,25 @@ jobs:
         env:
           VITE_AGENT_RUNNER_URL: https://y3toolbox.b4im.com
 
+      - name: Generate release train manifest
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_TRAIN_ID: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_BACKEND_VERSION: ${{ inputs.backend_version || vars.RELEASE_BACKEND_VERSION }}
+          RELEASE_MINIMUM_CLIENT_VERSION: ${{ inputs.minimum_client_version || vars.RELEASE_MINIMUM_CLIENT_VERSION }}
+          RELEASE_SUPPORTED_CLIENT_RANGE: ${{ inputs.supported_client_range || vars.RELEASE_SUPPORTED_CLIENT_RANGE }}
+          RELEASE_LATEST_CLIENT_URL: https://github.com/BAIMOoo/Y3-toolbox/releases/latest
+          RELEASE_NOTES_URL: https://github.com/BAIMOoo/Y3-toolbox/releases/latest
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          if (-not $env:RELEASE_BACKEND_VERSION) { throw 'backend_version workflow input is required' }
+          if (-not $env:RELEASE_MINIMUM_CLIENT_VERSION) { throw 'minimum_client_version workflow input is required' }
+          if (-not $env:RELEASE_SUPPORTED_CLIENT_RANGE) { throw 'supported_client_range workflow input is required' }
+          $env:RELEASE_BUILT_AT = (Get-Date).ToUniversalTime().ToString("o")
+          npx tsx scripts/release/generateReleaseManifest.ts --output release/release-manifest.json
+
       - name: Stage portable executable
         shell: pwsh
         run: |
@@ -62,13 +93,18 @@ jobs:
           $releaseTag = '${{ inputs.release_tag || github.ref_name }}'
           $version = $releaseTag -replace '^v', ''
           Copy-Item -LiteralPath $portable.FullName -Destination "release/Y3-Toolbox-$version.exe" -Force
+          if (-not (Test-Path -LiteralPath 'release/release-manifest.json')) {
+            throw 'Release manifest was not produced.'
+          }
           Get-ChildItem -LiteralPath release | Format-Table Name,Length
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
         with:
           name: y3-toolbox-windows-${{ inputs.release_tag || github.ref_name || 'manual' }}
-          path: release/*.exe
+          path: |
+            release/*.exe
+            release/release-manifest.json
           if-no-files-found: error
           retention-days: 30
 
@@ -77,6 +113,8 @@ jobs:
         with:
           tag_name: ${{ inputs.release_tag || github.ref_name }}
           name: ${{ inputs.release_tag || github.ref_name }}
-          files: release/*.exe
+          files: |
+            release/*.exe
+            release/release-manifest.json
           fail_on_unmatched_files: true
           generate_release_notes: true
