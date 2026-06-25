@@ -4,6 +4,7 @@ import { parseCsvFile, parseCsvText } from '../parser/csvParser';
 import { buildTimePoints, extractRootKeys } from '../parser/pipeline';
 import { SnapshotEngine } from '../engine/snapshotEngine';
 import { generateCleanCsv } from '../utils/generateCleanCsv';
+import { detectRecoveryAid } from '../recovery/recoveryIdentity';
 
 const DEFAULT_FILTER: FilterState = {
   timeRange: null,
@@ -23,6 +24,9 @@ export function useArchiveData() {
 
   const availableRootKeys = useMemo(() => extractRootKeys(timePoints), [timePoints]);
   const snapshotEngine = useMemo(() => new SnapshotEngine(timePoints), [timePoints]);
+  const recoveryAidDetection = useMemo(() => detectRecoveryAid(rawRows), [rawRows]);
+  const recoveryAid = recoveryAidDetection.aid;
+  const recoveryAidConflict = recoveryAidDetection.status === 'multiple' ? recoveryAidDetection.distinctAids : [];
 
   const filteredTimePoints = useMemo(() => {
     return timePoints
@@ -142,7 +146,7 @@ export function useArchiveData() {
 
   return {
     timePoints, filteredTimePoints, filteredIndexMap,
-    selectedIndex, filter, fileName, loading, error,
+    selectedIndex, filter, fileName, recoveryAid, recoveryAidConflict, loading, error,
     availableRootKeys, snapshotEngine, loadFile, loadFromText, setFilter,
     setSelectedIndex: goToIndex, goToPrev, goToNext, goToFirst, goToLast,
     downloadCleanCsv,
