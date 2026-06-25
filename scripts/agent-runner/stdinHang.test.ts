@@ -61,6 +61,7 @@ describe('agent runner stdin handling', () => {
       body: JSON.stringify({
         skillId: 'fetch-archive-changes',
         params: { players: 'smoke', mapId: '204521', from: '2026.06.03-00:00:00', to: '2026.06.04-00:00:00' },
+        clientVersion: '0.1.6',
       }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
 

@@ -81,12 +81,26 @@ export interface AgentPublicSkillStatus {
   label: string;
 }
 
+export interface AgentReleaseInfo {
+  schemaVersion: 1;
+  releaseTrainId: string;
+  clientVersion: string;
+  backendVersion: string;
+  backendCommit?: string;
+  builtAt?: string;
+  minimumClientVersion: string;
+  supportedClientRange: string;
+  latestClientUrl?: string;
+  releaseNotesUrl?: string;
+}
+
 export interface AgentHealthResponse {
   ready: boolean;
   trustedOnly: true;
   warning: string;
   queue: AgentQueueStatus;
   skills: AgentPublicSkillStatus[];
+  release: AgentReleaseInfo;
 }
 
 export interface AgentProviderStatus {
@@ -112,4 +126,5 @@ export interface AgentSubmitRequest {
   skillId: AgentSkillId;
   params: Record<string, string | number | boolean | string[]>;
   ownerToken?: string;
+  clientVersion?: string;
 }

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
@@ -22,6 +23,16 @@ async function startElectronOnce({
 }
 
 // https://vite.dev/config/
+function readPackageVersion() {
+  try {
+    const parsed = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown }
+    return typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
+
+const y3ToolboxVersion = readPackageVersion()
 const agentRunnerUrl = process.env.VITE_AGENT_RUNNER_URL || ''
 const agentServiceProxyTarget = process.env.AGENT_SERVICE_PROXY_TARGET
   || process.env.AGENT_RUNNER_PROXY_TARGET
@@ -31,6 +42,7 @@ const agentServiceProxyTarget = process.env.AGENT_SERVICE_PROXY_TARGET
 export default defineConfig({
   define: {
     __AGENT_RUNNER_URL__: JSON.stringify(agentRunnerUrl),
+    __Y3_TOOLBOX_VERSION__: JSON.stringify(y3ToolboxVersion),
   },
   base: './', // Electron 需要相对路径
   server: {
@@ -52,6 +64,7 @@ export default defineConfig({
         vite: {
           define: {
             __AGENT_RUNNER_URL__: JSON.stringify(agentRunnerUrl),
+            __Y3_TOOLBOX_VERSION__: JSON.stringify(y3ToolboxVersion),
           },
           build: {
             outDir: 'dist-electron',
@@ -65,6 +78,7 @@ export default defineConfig({
         vite: {
           define: {
             __AGENT_RUNNER_URL__: JSON.stringify(agentRunnerUrl),
+            __Y3_TOOLBOX_VERSION__: JSON.stringify(y3ToolboxVersion),
           },
           build: {
             lib: {

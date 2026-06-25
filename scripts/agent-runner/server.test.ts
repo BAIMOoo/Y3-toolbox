@@ -4,7 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { createAgentRunnerServer, createDefaultConfig, splitArgsTemplate } from './server';
-import type { AgentJobSummary, AgentSkillDefinition } from '../../src/agentJobs/types';
+import type { AgentHealthResponse, AgentJobSummary, AgentSkillDefinition } from '../../src/agentJobs/types';
 
 const servers: http.Server[] = [];
 
@@ -55,24 +55,93 @@ const FETCH_FORBIDDEN_PORTS = new Set([
 ]);
 
 describe('agent runner HTTP API', () => {
+
+  it('returns fail-safe release metadata from public health when release config is malformed', async () => {
+    const originalRange = process.env.AGENT_SUPPORTED_CLIENT_RANGE;
+    const originalUrl = process.env.AGENT_LATEST_CLIENT_URL;
+    process.env.AGENT_SUPPORTED_CLIENT_RANGE = '^0.1.0';
+    process.env.AGENT_LATEST_CLIENT_URL = 'http://127.0.0.1/download';
+    try {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-server-invalid-release-'));
+      await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ version: '0.1.6' }), 'utf8');
+      const base = await start(root, {
+        AGENT_RUNNER_PROJECT_ROOT: root,
+        AGENT_SUPPORTED_CLIENT_RANGE: '^0.1.0',
+        AGENT_LATEST_CLIENT_URL: 'http://127.0.0.1/download',
+      });
+
+      const response = await fetch(`${base}/api/health`);
+      expect(response.status).toBe(200);
+      const health = await response.json() as AgentHealthResponse;
+      expect(health.release).toMatchObject({
+        schemaVersion: 1,
+        clientVersion: 'invalid',
+        backendVersion: 'invalid',
+        minimumClientVersion: 'invalid',
+        supportedClientRange: 'invalid',
+        latestClientUrl: 'https://github.com/BAIMOoo/Y3-toolbox/releases/latest',
+      });
+      expect(JSON.stringify(health.release)).not.toContain('127.0.0.1');
+    } finally {
+      if (originalRange === undefined) delete process.env.AGENT_SUPPORTED_CLIENT_RANGE;
+      else process.env.AGENT_SUPPORTED_CLIENT_RANGE = originalRange;
+      if (originalUrl === undefined) delete process.env.AGENT_LATEST_CLIENT_URL;
+      else process.env.AGENT_LATEST_CLIENT_URL = originalUrl;
+    }
+  });
+
+  it('rejects direct job submissions when client compatibility cannot be verified', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-server-compat-'));
+    const base = await start(root, {
+      AGENT_MINIMUM_CLIENT_VERSION: '0.2.0',
+      AGENT_SUPPORTED_CLIENT_RANGE: '>=0.2.0',
+      AGENT_LATEST_CLIENT_VERSION: '0.2.0',
+      AGENT_BACKEND_VERSION: '0.2.0',
+    });
+
+    const stale = await fetch(`${base}/api/jobs`, {
+      method: 'POST',
+      headers: ownerHeaders(),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
+    });
+    expect(stale.status).toBe(426);
+
+    const missing = await fetch(`${base}/api/jobs`, {
+      method: 'POST',
+      headers: ownerHeaders(),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 } }),
+    });
+    expect(missing.status).toBe(426);
+
+    await expect(fs.readdir(path.join(root, 'jobs')).catch(() => [])).resolves.toEqual([]);
+  }, 15_000);
+
   it('serves catalog, submits job, polls status, and downloads artifact by id', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-server-'));
     const base = await start(root);
-    const health = await fetch(`${base}/api/health`).then((res) => res.json()) as { agentProvider?: unknown; queue: { maxRunning: number; maxQueued: number } };
+    const health = await fetch(`${base}/api/health`).then((res) => res.json()) as AgentHealthResponse & { agentProvider?: unknown };
     expect(health.agentProvider).toBeUndefined();
     expect(health.queue).toMatchObject({ maxRunning: 5, maxQueued: 10 });
+    expect(health.release).toMatchObject({
+      schemaVersion: 1,
+      releaseTrainId: 'local-dev',
+      backendVersion: expect.any(String),
+      minimumClientVersion: expect.any(String),
+      supportedClientRange: expect.stringMatching(/^>=/),
+    });
+    expect(JSON.stringify(health.release)).not.toMatch(/[A-Za-z]:\\|\/mnt\/|AGENT_|TOKEN|SECRET|PASSWORD/i);
     const diagnostics = await fetch(`${base}/api/diagnostics`).then((res) => res.json()) as { agentProvider: { name: string; ready: boolean } };
     expect(diagnostics.agentProvider).toEqual({ name: 'mock-agent', ready: true, details: ['mock agent provider enabled'] });
     const skills = await fetch(`${base}/api/skills`).then((res) => res.json()) as { skills: AgentSkillDefinition[] };
     expect(skills.skills.map((skill) => skill.id)).toEqual(['fetch-archive-changes', 'fetch-mismatch-logs', 'export-kkres-image']);
 
-    const rejected = await fetch(`${base}/api/jobs`, { method: 'POST', headers: ownerHeaders(), body: JSON.stringify({ skillId: 'bad', params: {} }) });
+    const rejected = await fetch(`${base}/api/jobs`, { method: 'POST', headers: ownerHeaders(), body: JSON.stringify({ skillId: 'bad', params: {}, clientVersion: '0.1.6' }) });
     expect(rejected.status).toBe(400);
 
     const created = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 } }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
     const id = created.job.id;
     let job = created.job;
@@ -94,7 +163,7 @@ describe('agent runner HTTP API', () => {
     const created = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 } }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
     const id = created.job.id;
     let job = created.job;
@@ -200,7 +269,7 @@ describe('agent runner HTTP API', () => {
     const created = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 } }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
     const id = created.job.id;
 
@@ -227,7 +296,7 @@ describe('agent runner HTTP API', () => {
     const created = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(OWNER_A),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 } }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
 
     const ownerAJobs = await fetch(`${base}/api/jobs`, { headers: ownerHeaders(OWNER_A) }).then((res) => res.json()) as { jobs: AgentJobSummary[] };
@@ -257,7 +326,7 @@ describe('agent runner HTTP API', () => {
     const rejected = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 } }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
     });
 
     expect(rejected.status).toBe(429);

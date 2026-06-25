@@ -42,6 +42,20 @@ describe('Electron mainline static smoke coverage', () => {
     expect(preload).toContain("readArchiveInput: (inputPath: string) => ipcRenderer.invoke('archive:readInput', inputPath)");
   });
 
+
+
+  it('opens external HTTP links in the system browser instead of an in-app Electron window', () => {
+    const main = read('electron/main.ts');
+
+    expect(main).toContain("shell } from 'electron'");
+    expect(main).toContain('setWindowOpenHandler');
+    expect(main).toContain('shell.openExternal(url)');
+    expect(main).toContain("return { action: 'deny' }");
+    expect(main).toContain("mainWindow.webContents.on('will-navigate'");
+    expect(main).toContain('isInternalAppHttpUrl');
+    expect(main).toContain("url.port === '5174'");
+  });
+
   it('shares local input extension rules between renderer routing and Electron archive validation', () => {
     const routing = read('src/utils/openFileRouting.ts');
     const archiveContract = read('src/archiveViewer/archiveFileContract.ts');

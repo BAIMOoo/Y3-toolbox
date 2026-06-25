@@ -7,6 +7,7 @@ import { TRUSTED_RUNNER_WARNING } from '../../src/agentJobs/catalog';
 import type { AgentSubmitRequest } from '../../src/agentJobs/types';
 import { AgentJobStore } from './jobStore';
 import type { RunnerConfig } from './contracts';
+import { assertClientCompatibleForSubmission } from './compatibilityGate';
 
 const CODEX_BIN_RELATIVE_PATH = ['node_modules', '@openai', 'codex', 'bin', 'codex.js'];
 const DEFAULT_CODEX_ARGS_TEMPLATE = ['exec', '--cd', '{projectRoot}', '--dangerously-bypass-approvals-and-sandbox'];
@@ -110,6 +111,15 @@ export function createDefaultConfig(env: NodeJS.ProcessEnv = process.env): Runne
     kkresProjectPath: env.AGENT_KKRES_PROJECT_PATH,
     kkresPublicInputRoot: env.AGENT_KKRES_PUBLIC_INPUT_ROOT,
     agentSkillRoot: env.AGENT_SKILL_ROOT,
+    agentReleaseTrainId: env.AGENT_RELEASE_TRAIN_ID || env.RELEASE_TRAIN_ID,
+    agentLatestClientVersion: env.AGENT_LATEST_CLIENT_VERSION,
+    agentBackendVersion: env.AGENT_BACKEND_VERSION,
+    agentBackendCommit: env.AGENT_BACKEND_COMMIT,
+    agentBackendBuiltAt: env.AGENT_BACKEND_BUILT_AT,
+    agentMinimumClientVersion: env.AGENT_MINIMUM_CLIENT_VERSION,
+    agentSupportedClientRange: env.AGENT_SUPPORTED_CLIENT_RANGE,
+    agentLatestClientUrl: env.AGENT_LATEST_CLIENT_URL,
+    agentReleaseNotesUrl: env.AGENT_RELEASE_NOTES_URL,
   };
 }
 
@@ -152,11 +162,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, store: A
     try {
       const ownerToken = readOwnerToken(req, url, body.ownerToken);
       if (!ownerToken) throw new Error('Owner token is required');
+      const health = await store.health();
+      assertClientCompatibleForSubmission(health.release, body.clientVersion);
       const job = await store.submit(String(body.skillId || ''), asParams(body.params), ownerToken, getSourceKey(req, config));
       return sendJson(res, 201, { job });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const status = /busy|maintenance|Owner token|throttled/i.test(message) ? 429 : 400;
+      const status = /compatibility|Client version/i.test(message) ? 426 : /busy|maintenance|Owner token|throttled/i.test(message) ? 429 : 400;
       return sendJson(res, status, { error: publicError(message) });
     }
   }

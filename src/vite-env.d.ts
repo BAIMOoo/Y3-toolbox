@@ -9,3 +9,5 @@ interface ImportMeta {
 }
 
 declare const __AGENT_RUNNER_URL__: string
+
+declare const __Y3_TOOLBOX_VERSION__: string

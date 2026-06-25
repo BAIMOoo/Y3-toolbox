@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { DownloadOutlined } from '@ant-design/icons';
 import { Button, Alert, Card, Input, InputNumber, Progress, Select, Space, Tag, Typography, message } from 'antd';
 import { fetchAgentHealth, getAgentArtifactDownloadUrl, fetchAgentJob, fetchAgentJobEvents, fetchAgentJobs, fetchAgentSkills, getAgentOwnerToken, submitAgentJob } from './api';
+import { evaluateAgentCompatibility } from './agentCompatibility';
 import { applyAgentParamDefaults, getAgentParamDefaults, validateAgentParams } from './catalog';
 import type { AgentHealthResponse, AgentJobEvent, AgentJobEventsResponse, AgentJobSummary, AgentSkillDefinition, AgentSubmitRequest } from './types';
 import { AgentJobEventList } from './AgentJobEventList';
@@ -43,7 +44,17 @@ export function AgentJobCenter() {
   const visibleActiveJobEvents = useMemo(() => filterUserVisibleJobEvents(activeJobEvents), [activeJobEvents]);
   const activeJobEventMeta = activeJob ? jobEventMeta[activeJob.id] : undefined;
   const activeJobDownloadArtifacts = useMemo(() => (activeJob ? visibleDownloadArtifacts(activeJob) : []), [activeJob]);
-  const serviceStatus = useMemo(() => getAgentRunnerStatus(health, { loading: bootstrapLoading }), [bootstrapLoading, health]);
+  const compatibility = useMemo(() => evaluateAgentCompatibility(health?.release), [health]);
+  const maintenanceSubmitBlocked = Boolean(health?.queue.submissionsDisabled);
+  const showCompatibilityAlert = !bootstrapLoading && compatibility.submitBlocked;
+  const submitDisabledReason = bootstrapLoading
+    ? '正在连接任务服务'
+    : maintenanceSubmitBlocked
+      ? '任务服务维护中，暂不接受新任务'
+      : compatibility.submitBlocked
+        ? compatibility.message ?? compatibility.statusLabel
+        : '';
+  const serviceStatus = useMemo(() => getAgentRunnerStatus(health, { loading: bootstrapLoading, compatibility }), [bootstrapLoading, compatibility, health]);
   const queueStatus = useMemo(() => getAgentQueueStatus(health, { loading: bootstrapLoading }), [bootstrapLoading, health]);
   const refreshHealth = useCallback(async () => {
     const healthPayload = await fetchAgentHealth();
@@ -189,6 +200,14 @@ export function AgentJobCenter() {
 
   const submit = async () => {
     if (!selectedSkill) return;
+    if (maintenanceSubmitBlocked) {
+      setError('任务服务维护中，暂不接受新任务');
+      return;
+    }
+    if (compatibility.submitBlocked) {
+      setError(compatibility.message ?? compatibility.statusLabel);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -245,6 +264,22 @@ export function AgentJobCenter() {
         message="共享任务服务：真实任务会执行"
         description={`提交后会触发真实任务；任务按当前浏览器本地标识区分（${getAgentOwnerToken().slice(0, 8)}…），服务可能随时限流、排队、维护或暂停提交。`}
       />
+      {showCompatibilityAlert && (
+        <Alert
+          className="agent-job-compatibility-alert"
+          type="error"
+          showIcon
+          message={compatibility.message}
+          description={(
+            <Space direction="vertical" size={4}>
+              <span>{compatibility.description}</span>
+              <span>已有任务列表和结果仍可查看；只有新任务提交会被暂停。</span>
+              <span>当前客户端：{compatibility.currentClientVersion}{compatibility.minimumClientVersion ? ` · 最低要求：${compatibility.minimumClientVersion}` : ''}{compatibility.supportedClientRange ? ` · 支持范围：${compatibility.supportedClientRange}` : ''}</span>
+              <a href={compatibility.latestClientUrl} target="_blank" rel="noreferrer">打开 GitHub Releases 下载最新版本</a>
+            </Space>
+          )}
+        />
+      )}
       {error && <Alert type="error" showIcon closable message={error} onClose={() => setError(null)} />}
 
       <div className="agent-job-workspace">
@@ -309,7 +344,7 @@ export function AgentJobCenter() {
                 description={KKRES_IMPORT_SAFETY_DESCRIPTION}
               />
             )}
-            <Button type="primary" loading={loading} disabled={bootstrapLoading} onClick={() => void submit()}>{bootstrapLoading ? '等待连接' : '提交任务'}</Button>
+            <Button type="primary" loading={loading} disabled={Boolean(submitDisabledReason)} title={submitDisabledReason || undefined} onClick={() => void submit()}>{submitDisabledReason ? '暂不可提交' : '提交任务'}</Button>
           </Space>
         </Card>
 

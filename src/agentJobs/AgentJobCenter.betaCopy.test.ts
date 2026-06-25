@@ -25,13 +25,17 @@ describe('AgentJobCenter beta warning copy contract', () => {
   });
 
 
-  it('keeps queue status informational instead of disabling submit from cached health', () => {
+  it('keeps queue status informational while compatibility gates submit explicitly', () => {
     const source = readFileSync(new URL('./AgentJobCenter.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('getAgentQueueStatus');
     expect(source).toContain('submitAgentJob');
-    expect(source).not.toContain('submitDisabledReason');
-    expect(source).not.toContain('disabled={Boolean(submitDisabledReason)}');
+    expect(source).toContain('submitDisabledReason');
+    expect(source).toContain('compatibility.submitBlocked');
+    expect(source).toContain('showCompatibilityAlert');
+    expect(source).toContain('maintenanceSubmitBlocked');
+    expect(source).toContain('任务服务维护中，暂不接受新任务');
+    expect(source).toContain('disabled={Boolean(submitDisabledReason)}');
   });
 
   it('shows a first-load connection state before rendering true empty task data', () => {
@@ -43,8 +47,25 @@ describe('AgentJobCenter beta warning copy contract', () => {
     expect(source).toContain('正在连接任务服务，连接成功后会显示任务详情');
     expect(source).toContain('AgentJobLoadingState');
     expect(source).toContain('aria-label="正在连接任务服务"');
-    expect(source).toContain('disabled={bootstrapLoading}');
+    expect(source).toContain('const submitDisabledReason = bootstrapLoading');
+    expect(source).toContain("? '正在连接任务服务'");
   });
+
+  it('shows compatibility update guidance without forced background replacement', () => {
+    const source = readFileSync(new URL('./AgentJobCenter.tsx', import.meta.url), 'utf8');
+    const compatibility = readFileSync(new URL('./agentCompatibility.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain('agent-job-compatibility-alert');
+    expect(source).toContain('const showCompatibilityAlert = !bootstrapLoading && compatibility.submitBlocked');
+    expect(source).toContain('{showCompatibilityAlert && (');
+    expect(source).toContain('打开 GitHub Releases 下载最新版本');
+    expect(source).toContain('已有任务列表和结果仍可查看');
+    expect(compatibility).toContain('https://github.com/BAIMOoo/Y3-toolbox/releases/latest');
+    expect(compatibility).not.toContain('https://github.com/BAIM/y3-toolbox/releases/latest');
+    expect(source).not.toContain('autoUpdater');
+    expect(source).not.toContain('electron-updater');
+  });
+
 
   it('uses owner-scoped artifact download URLs with a desktop-safe click handoff', () => {
     const source = readFileSync(new URL('./AgentJobCenter.tsx', import.meta.url), 'utf8');
@@ -52,7 +73,8 @@ describe('AgentJobCenter beta warning copy contract', () => {
     expect(source).toContain('getAgentArtifactDownloadUrl(artifact.downloadUrl)');
     expect(source).toContain('handleAgentArtifactDownloadClick');
     expect(source).toContain('window.electronAPI');
-    expect(source).not.toContain('target="_blank"');
+    expect(source).toContain('href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}');
+    expect(source).not.toContain('target="_blank" rel="noopener"');
   });
 
   it('shows only kkres downloads for kkres export jobs', () => {

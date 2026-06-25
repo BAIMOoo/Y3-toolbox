@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { isAgentSkillId, validateAgentParams, TRUSTED_RUNNER_WARNING } from '../../src/agentJobs/catalog';
 import type { AgentArtifact, AgentDiagnosticsResponse, AgentHealthResponse, AgentJobStatus, AgentJobSummary } from '../../src/agentJobs/types';
 import { AGENT_SKILL_CONTRACTS, buildAgentExecution, buildMockAgentCommand, checkAgentProvider, type AgentJobEvent, type AgentResultManifest, type RunnerCommand, type RunnerConfig } from './contracts';
+import { createAgentReleaseInfo } from './releaseInfo';
 
 const EVENTS_FILE = 'events.jsonl';
 const STATE_FILE = 'job-state.json';
@@ -109,6 +110,7 @@ export class AgentJobStore {
         skillId: contract.skill.id,
         label: contract.skill.label,
       })),
+      release: createAgentReleaseInfo(this.config),
     };
   }
 

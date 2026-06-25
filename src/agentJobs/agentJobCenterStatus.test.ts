@@ -14,6 +14,14 @@ const baseHealth: AgentHealthResponse = {
     submissionsDisabled: false,
   },
   skills: [{ skillId: 'fetch-mismatch-logs', label: '拉取不同步日志' }],
+  release: {
+    schemaVersion: 1,
+    releaseTrainId: 'local-dev',
+    clientVersion: '0.1.6',
+    backendVersion: '0.1.6',
+    minimumClientVersion: '0.1.6',
+    supportedClientRange: '>=0.1.6',
+  },
 };
 
 describe('agent task service status view', () => {
@@ -39,6 +47,42 @@ describe('agent task service status view', () => {
 
   it('reports partial readiness when public health is reachable but aggregate readiness is false', () => {
     expect(getAgentRunnerStatus(baseHealth)).toEqual({ label: '任务服务部分可用', color: 'warning' });
+  });
+
+
+
+  it('reports update-required read-only state when health is reachable but compatibility blocks submit', () => {
+    expect(getAgentRunnerStatus({ ...baseHealth, ready: true }, {
+      compatibility: {
+        compatible: false,
+        submitBlocked: true,
+        tone: 'error',
+        statusLabel: '客户端需要更新',
+        message: '当前客户端版本过旧，已暂停提交任务',
+        description: '请更新客户端',
+        currentClientVersion: '0.1.5',
+        latestClientUrl: 'https://github.com/BAIMOoo/Y3-toolbox/releases/latest',
+        reason: 'stale-client',
+      },
+    })).toEqual({ label: '客户端需要更新', color: 'error' });
+  });
+
+  it('keeps maintenance distinct and higher priority than compatibility failure', () => {
+    expect(getAgentRunnerStatus({
+      ...baseHealth,
+      ready: true,
+      queue: { ...baseHealth.queue, submissionsDisabled: true },
+    }, {
+      compatibility: {
+        compatible: false,
+        submitBlocked: true,
+        tone: 'error',
+        statusLabel: '客户端需要更新',
+        currentClientVersion: '0.1.5',
+        latestClientUrl: 'https://github.com/BAIMOoo/Y3-toolbox/releases/latest',
+        reason: 'stale-client',
+      },
+    })).toEqual({ label: '任务服务维护中', color: 'error' });
   });
 
   it('reports not ready when no public skills are available', () => {

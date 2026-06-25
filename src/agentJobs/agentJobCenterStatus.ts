@@ -1,3 +1,4 @@
+import type { AgentCompatibilityResult } from './agentCompatibility';
 import type { AgentHealthResponse, AgentJobSummary } from './types';
 
 const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed']);
@@ -18,12 +19,14 @@ export interface AgentQueueStatusView {
 
 interface AgentStatusOptions {
   loading?: boolean;
+  compatibility?: AgentCompatibilityResult;
 }
 
 export function getAgentRunnerStatus(health: AgentHealthResponse | null, options: AgentStatusOptions = {}): AgentRunnerStatusView {
   if (!health && options.loading) return { label: '正在连接任务服务', color: 'processing' };
   if (!health) return { label: '任务服务未连接', color: 'error' };
   if (health.queue.submissionsDisabled) return { label: '任务服务维护中', color: 'error' };
+  if (options.compatibility?.submitBlocked) return { label: options.compatibility.statusLabel, color: 'error' };
   if (health.ready) return { label: '任务服务可用', color: 'success' };
   if (health.skills.length > 0) return { label: '任务服务部分可用', color: 'warning' };
   return { label: '任务服务未就绪', color: 'error' };
