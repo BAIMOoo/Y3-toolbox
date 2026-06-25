@@ -15,6 +15,7 @@ interface FilterBarProps {
   loading: boolean;
   fileName: string | null;
   onDownloadClean?: () => void;
+  onOpenRecovery?: () => void;
 }
 
 const CHANGE_TYPE_OPTIONS: { value: ChangeType; label: string; color: string; icon: string }[] = [
@@ -59,6 +60,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   loading,
   fileName,
   onDownloadClean,
+  onOpenRecovery,
 }) => {
 
   const handleSearch = useCallback(
@@ -154,6 +156,17 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         <div className="diff-context-toolbar__actions">
           <FileUpload onFileSelected={onFileSelected} loading={loading} fileName={fileName} variant="toolbar" />
           <div style={{ width: 1, height: 22, background: 'var(--border)', flexShrink: 0 }} />
+          {onOpenRecovery && (
+            <button
+              type="button"
+              onClick={onOpenRecovery}
+              disabled={!fileName || loading}
+              className="recovery-toolbar-button"
+              aria-label="存档回退"
+            >
+              存档回退
+            </button>
+          )}
           <Tooltip title="下载整理后的 CSV">
             <button
               type="button"
