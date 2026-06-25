@@ -3,12 +3,15 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  define: {
+    __Y3_TOOLBOX_VERSION__: JSON.stringify('0.1.6'),
+  },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.{js,ts}', 'scripts/agent-runner/**/*.test.{js,ts}', 'scripts/recovery/**/*.test.{js,ts}', 'scripts/windows/**/*.test.{js,ts}', '*.test.{js,ts}'],
-    exclude: ['node_modules/**', '.worktrees/**', '.omx/**'],
-    // Use a single forks worker to avoid worker startup timeouts in WSL/Windows worktrees.
-    pool: 'forks',
+    include: ['src/**/*.test.{js,ts}', 'scripts/agent-runner/**/*.test.{js,ts}', 'scripts/recovery/**/*.test.{js,ts}', 'scripts/release/**/*.test.{js,ts}', 'scripts/windows/**/*.test.{js,ts}', '*.test.{js,ts}'],
+    exclude: ['node_modules/**', '.worktrees/**', '.omx/**', '**/.omx/**', '**/scratch/**'],
+    // Use a single vmThreads worker to avoid fork/worker startup timeouts in WSL/Windows worktrees.
+    pool: 'vmThreads',
     maxWorkers: 1,
   },
 });

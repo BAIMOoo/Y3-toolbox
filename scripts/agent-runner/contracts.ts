@@ -29,6 +29,15 @@ export interface RunnerConfig {
   kkresProjectPath?: string;
   kkresPublicInputRoot?: string;
   agentSkillRoot?: string;
+  agentReleaseTrainId?: string;
+  agentLatestClientVersion?: string;
+  agentBackendVersion?: string;
+  agentBackendCommit?: string;
+  agentBackendBuiltAt?: string;
+  agentMinimumClientVersion?: string;
+  agentSupportedClientRange?: string;
+  agentLatestClientUrl?: string;
+  agentReleaseNotesUrl?: string;
 }
 
 export interface RunnerCommand {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron';
 import fs from 'fs/promises';
 import { createReadStream } from 'fs';
 import http from 'http';
@@ -22,6 +22,20 @@ function getConfiguredAgentRunnerUrl(): string {
   const configuredUrl = process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL;
   if (configuredUrl) return configuredUrl;
   return app.isPackaged ? 'http://127.0.0.1:8790' : 'http://127.0.0.1:8791';
+}
+
+function isSafeExternalHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+    return !isInternalAppHttpUrl(url);
+  } catch {
+    return false;
+  }
+}
+
+function isInternalAppHttpUrl(url: URL): boolean {
+  return (url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port === '5174';
 }
 
 function createAgentArtifactDownloadId(): string {
@@ -57,6 +71,19 @@ async function createWindow() {
   // WSL 启动 Windows electron.exe 时，VITE_DEV_SERVER_URL 有时不会进入 Electron 主进程；
   // 因此开发模式下额外探测默认 Vite 地址，避免加载 stale dist/index.html。
   const devServerUrl = await resolveDevServerUrl();
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isSafeExternalHttpUrl(url)) {
+      void shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isSafeExternalHttpUrl(url)) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
+  });
+
   if (devServerUrl) {
     await mainWindow.webContents.session.clearCache();
     mainWindow.loadURL(withDevCacheBust(devServerUrl));

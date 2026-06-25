@@ -593,6 +593,12 @@ describe('AgentJobStore', () => {
     const health = await store.health();
     expect(health.ready).toBe(false);
     expect(health.skills).toHaveLength(3);
+    expect(health.release).toMatchObject({
+      schemaVersion: 1,
+      releaseTrainId: 'local-dev',
+      minimumClientVersion: 'invalid',
+      supportedClientRange: 'invalid',
+    });
   }, 15_000);
   it('persists an event lifecycle with stdout, stderr, progress, and terminal events', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-events-'));
