@@ -294,6 +294,17 @@ body {
   flex-direction: column;
 }
 
+.diff-workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-workspace[hidden] {
+  display: none;
+}
+
 .app-content--local-archive {
   overflow: hidden;
 }

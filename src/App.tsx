@@ -373,86 +373,89 @@ function App() {
         </header>
         {shellError && <Alert message={shellError} type="error" closable onClose={() => setShellError(null)} style={{ margin: '8px 16px 0' }} />}
         <main className={`app-content app-content--${mode}`}>
-        {mode === 'local-archive' ? (
-          <LocalArchiveViewer initialOpen={pendingArchiveOpen} onInitialPathConsumed={() => setPendingArchiveOpen(null)} />
-        ) : mode === 'agent-jobs' ? (
-          <AgentJobCenter />
-        ) : (
-          <>
-        {error && (
-          <Alert message={error} type="error" closable style={{ margin: '8px 16px 0' }} />
-        )}
-
-        {!showDiffContextToolbar ? (
-          <EmptyState onFileSelected={handleDiffFileSelected} loading={loading} />
-        ) : (
-          <>
-            <FilterBar
-              filter={filter}
-              onFilterChange={setFilter}
-              availableRootKeys={availableRootKeys}
-              onFileSelected={handleDiffFileSelected}
-              loading={loading}
-              fileName={fileName}
-              onDownloadClean={downloadCleanCsv}
-              onOpenRecovery={() => setDiffWorkspaceMode('recovery')}
-            />
-
-            <Timeline
-              timePoints={timePoints}
-              filteredTimePoints={filteredTimePoints}
-              filteredIndexMap={filteredIndexMap}
-              selectedIndex={selectedIndex}
-              onSelectIndex={setSelectedIndex}
-              onPrev={goToPrev}
-              onNext={goToNext}
-              onFirst={goToFirst}
-              onLast={goToLast}
-            />
-
-            {isRecoveryWorkspace ? (
-              <RecoveryPanel
-                fileName={fileName}
-                aid={recoveryAid}
-                aidConflict={recoveryAidConflict}
-                timePoints={timePoints}
-                selectedIndex={selectedIndex}
-                view="workspace"
-                onClose={() => setDiffWorkspaceMode('compare')}
-              />
-            ) : (
-              <ResizableSplit
-                defaultRatio={0.4}
-                left={
-                  <ChangeList
-                    timePoint={filteredCurrentTP}
-                    selectedKey={highlightKey}
-                    onSelectKey={setHighlightKey}
-                  />
-                }
-                right={
-                  <SnapshotView
-                    prevSnapshot={filteredPrevSnapshot}
-                    currentSnapshot={filteredCurrentSnapshot}
-                    changes={filteredCurrentTP?.changes ?? []}
-                    highlightKey={highlightKey}
-                  />
-                }
-              />
+          {mode === 'local-archive' && (
+            <LocalArchiveViewer initialOpen={pendingArchiveOpen} onInitialPathConsumed={() => setPendingArchiveOpen(null)} />
+          )}
+          {mode === 'agent-jobs' && <AgentJobCenter />}
+          <section
+            data-testid="diff-workspace"
+            hidden={mode !== 'diff'}
+            aria-hidden={mode !== 'diff'}
+            className="diff-workspace"
+          >
+            {error && (
+              <Alert message={error} type="error" closable style={{ margin: '8px 16px 0' }} />
             )}
 
-            <StatusBar
-              fileName={fileName}
-              timePointCount={timePoints.length}
-              selectedIndex={selectedIndex}
-              currentChanges={changeCounts}
-              keyCount={statusBarKeyCount}
-              showSnapshotStats={!isRecoveryWorkspace}
-            />
-          </>
-        )}
-          </>
-        )}
+            {!showDiffContextToolbar ? (
+              <EmptyState onFileSelected={handleDiffFileSelected} loading={loading} />
+            ) : (
+              <>
+                <FilterBar
+                  filter={filter}
+                  onFilterChange={setFilter}
+                  availableRootKeys={availableRootKeys}
+                  onFileSelected={handleDiffFileSelected}
+                  loading={loading}
+                  fileName={fileName}
+                  onDownloadClean={downloadCleanCsv}
+                  onOpenRecovery={() => setDiffWorkspaceMode('recovery')}
+                />
+
+                <Timeline
+                  timePoints={timePoints}
+                  filteredTimePoints={filteredTimePoints}
+                  filteredIndexMap={filteredIndexMap}
+                  selectedIndex={selectedIndex}
+                  onSelectIndex={setSelectedIndex}
+                  onPrev={goToPrev}
+                  onNext={goToNext}
+                  onFirst={goToFirst}
+                  onLast={goToLast}
+                />
+
+                {isRecoveryWorkspace ? (
+                  <RecoveryPanel
+                    fileName={fileName}
+                    aid={recoveryAid}
+                    aidConflict={recoveryAidConflict}
+                    timePoints={timePoints}
+                    selectedIndex={selectedIndex}
+                    view="workspace"
+                    onClose={() => setDiffWorkspaceMode('compare')}
+                  />
+                ) : (
+                  <ResizableSplit
+                    defaultRatio={0.4}
+                    left={
+                      <ChangeList
+                        timePoint={filteredCurrentTP}
+                        selectedKey={highlightKey}
+                        onSelectKey={setHighlightKey}
+                      />
+                    }
+                    right={
+                      <SnapshotView
+                        prevSnapshot={filteredPrevSnapshot}
+                        currentSnapshot={filteredCurrentSnapshot}
+                        changes={filteredCurrentTP?.changes ?? []}
+                        highlightKey={highlightKey}
+                      />
+                    }
+                  />
+                )}
+
+                <StatusBar
+                  fileName={fileName}
+                  timePointCount={timePoints.length}
+                  selectedIndex={selectedIndex}
+                  currentChanges={changeCounts}
+                  keyCount={statusBarKeyCount}
+                  showSnapshotStats={!isRecoveryWorkspace}
+                />
+              </>
+            )}
+          </section>
         </main>
       </div>
     </ConfigProvider>
