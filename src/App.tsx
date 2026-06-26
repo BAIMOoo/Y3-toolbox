@@ -399,7 +399,8 @@ function App() {
                   loading={loading}
                   fileName={fileName}
                   onDownloadClean={downloadCleanCsv}
-                  onOpenRecovery={() => setDiffWorkspaceMode('recovery')}
+                  isRecoveryWorkspace={isRecoveryWorkspace}
+                  onToggleRecovery={() => setDiffWorkspaceMode((current) => (current === 'recovery' ? 'compare' : 'recovery'))}
                 />
 
                 <Timeline
@@ -422,7 +423,6 @@ function App() {
                     timePoints={timePoints}
                     selectedIndex={selectedIndex}
                     view="workspace"
-                    onClose={() => setDiffWorkspaceMode('compare')}
                   />
                 ) : (
                   <ResizableSplit
