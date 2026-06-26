@@ -3,11 +3,13 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import * as recoveryExport from '../recoveryExport';
-import { RecoveryPanel } from '../RecoveryPanel';
+import * as recoveryInference from '../recoveryInference';
+import { clearRecoveryPanelCacheForTests, RecoveryPanel } from '../RecoveryPanel';
 import type { ArchiveChange, TimePoint } from '../../types';
 import type { RecoveryInferenceResult } from '../recoveryInference';
 
 afterEach(() => {
+  clearRecoveryPanelCacheForTests();
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -198,23 +200,172 @@ describe('RecoveryPanel', () => {
 
 
 
-  it('previews every inferred fragment and field instead of truncating the UI list', async () => {
-    const manyPoints: TimePoint[] = Array.from({ length: 9 }, (_, index) => ({
+  it('shows a bounded preview first and reveals more fields on demand', async () => {
+    const manyPoints: TimePoint[] = Array.from({ length: 510 }, (_, index) => ({
       index,
       timestamp: new Date(Date.UTC(2026, 2, 20, 10, index, 0)),
-      changes: [
-        change(`74-${20000 + index}-物品数量`, String(100 + index), String(50 + index)),
-        change(`74-${20000 + index}-绑定状态`, '0', '1'),
-        change(`74-${20000 + index}-强化等级`, String(index), String(index + 1)),
-      ],
+      changes: [change(`74-${20000 + index}-物品数量`, String(100 + index), String(50 + index))],
     }));
 
     render(React.createElement(RecoveryPanel, { fileName: 'player abc.csv', timePoints: manyPoints, selectedIndex: 0, view: 'workspace' }));
 
-    expect(await screen.findByText(/当前预览展示全部 9 个槽位片段、27 个字段/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: '折叠 20008' })).toBeTruthy();
-    expect(screen.getAllByText('强化等级').length).toBeGreaterThan(0);
+    expect(await screen.findByText(/当前预览展示 500 \/ 510 个槽位片段、500 \/ 510 个字段/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /显示更多回退字段/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '折叠 20499' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '折叠 20509' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /显示更多回退字段/ }));
+
+    expect(await screen.findByText(/当前预览展示 510 \/ 510 个槽位片段、510 \/ 510 个字段/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: '折叠 20509' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /显示更多回退字段/ })).toBeNull();
+  }, 20000);
+
+  it('reuses cached recovery immediately when remounted with the same in-memory request', async () => {
+    vi.useFakeTimers();
+    const points: TimePoint[] = [
+      { index: 0, timestamp: new Date('2026-03-20T10:05:00Z'), changes: [change('74-30001-物品数量', '100', '50')] },
+    ];
+    const inferSpy = vi.spyOn(recoveryInference, 'inferRecoveryFragments');
+
+    const first = render(React.createElement(RecoveryPanel, { fileName: 'cache.csv', timePoints: points, selectedIndex: 0, view: 'workspace' }));
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(screen.getByRole('button', { name: '折叠 30001' })).toBeTruthy();
+    expect(inferSpy).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    render(React.createElement(RecoveryPanel, { fileName: 'cache.csv', timePoints: points, selectedIndex: 0, view: 'workspace' }));
+
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByRole('button', { name: '折叠 30001' })).toBeTruthy();
+    expect(inferSpy).toHaveBeenCalledTimes(1);
   });
+
+  it('does not show stale scheduled recovery during a same-mounted timePoints replacement with the same request key', async () => {
+    vi.useFakeTimers();
+    const firstPoints: TimePoint[] = [
+      { index: 0, timestamp: new Date('2026-03-20T10:05:00Z'), changes: [change('74-34001-物品数量', '100', '50')] },
+    ];
+    const nextPoints: TimePoint[] = [
+      { index: 0, timestamp: new Date('2026-03-20T10:05:00Z'), changes: [change('74-34002-物品数量', '100', '50')] },
+    ];
+
+    const { rerender } = render(React.createElement(RecoveryPanel, { fileName: 'same-key.csv', timePoints: firstPoints, selectedIndex: 0, view: 'workspace' }));
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(screen.getByRole('button', { name: '折叠 34001' })).toBeTruthy();
+
+    rerender(React.createElement(RecoveryPanel, { fileName: 'same-key.csv', timePoints: nextPoints, selectedIndex: 0, view: 'workspace' }));
+
+    expect(screen.queryByRole('button', { name: '折叠 34001' })).toBeNull();
+    expect(screen.getByRole('status').textContent).toContain('正在生成回退预览，完成前暂不可导出。');
+    expect(screen.getByRole('button', { name: '导出 JSON' })).toHaveProperty('disabled', true);
+
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+
+    expect(screen.queryByRole('button', { name: '折叠 34001' })).toBeNull();
+    expect(screen.getByRole('button', { name: '折叠 34002' })).toBeTruthy();
+  });
+
+  it('does not reuse cached recovery for a different timePoints array with similar surface stats', async () => {
+    vi.useFakeTimers();
+    const firstPoints: TimePoint[] = [
+      { index: 0, timestamp: new Date('2026-03-20T10:05:00Z'), changes: [change('74-30002-物品数量', '100', '50')] },
+    ];
+    const nextPoints: TimePoint[] = [
+      { index: 0, timestamp: new Date('2026-03-20T10:05:00Z'), changes: [change('74-30003-物品数量', '100', '50')] },
+    ];
+    const inferSpy = vi.spyOn(recoveryInference, 'inferRecoveryFragments');
+
+    const first = render(React.createElement(RecoveryPanel, { fileName: 'array.csv', timePoints: firstPoints, selectedIndex: 0, view: 'workspace' }));
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(screen.getByRole('button', { name: '折叠 30002' })).toBeTruthy();
+    first.unmount();
+
+    render(React.createElement(RecoveryPanel, { fileName: 'array.csv', timePoints: nextPoints, selectedIndex: 0, view: 'workspace' }));
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+
+    expect(screen.queryByRole('button', { name: '折叠 30002' })).toBeNull();
+    expect(screen.getByRole('button', { name: '折叠 30003' })).toBeTruthy();
+    expect(inferSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('resets the visible preview budget when the recovery request changes', async () => {
+    const manyPoints: TimePoint[] = Array.from({ length: 510 }, (_, index) => ({
+      index,
+      timestamp: new Date(Date.UTC(2026, 2, 20, 10, index, 0)),
+      changes: [change(`74-${31000 + index}-物品数量`, String(100 + index), String(50 + index))],
+    }));
+
+    render(React.createElement(RecoveryPanel, { fileName: 'budget.csv', timePoints: manyPoints, selectedIndex: 509, view: 'workspace' }));
+    expect(await screen.findByText(/500 \/ 510 个字段/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /显示更多回退字段/ }));
+    expect(await screen.findByText(/510 \/ 510 个字段/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '用当前时间' }));
+
+    expect(await screen.findByText(/1 \/ 1 个字段/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /显示更多回退字段/ })).toBeNull();
+  }, 20000);
+
+  it('keeps full export data when the visible preview is capped', async () => {
+    const downloadMocks = installDownloadMocks();
+    const captured: RecoveryInferenceResult[] = [];
+    vi.spyOn(recoveryExport, 'serializeRecoveryJson').mockImplementation((result) => {
+      captured.push(result);
+      return JSON.stringify(result);
+    });
+    const manyPoints: TimePoint[] = Array.from({ length: 510 }, (_, index) => ({
+      index,
+      timestamp: new Date(Date.UTC(2026, 2, 20, 10, index, 0)),
+      changes: [change(`74-${32000 + index}-物品数量`, String(100 + index), String(50 + index))],
+    }));
+
+    render(React.createElement(RecoveryPanel, { fileName: 'full-export.csv', timePoints: manyPoints, selectedIndex: 0, view: 'workspace' }));
+    await screen.findByText(/500 \/ 510 个字段/);
+    expect(screen.queryByRole('button', { name: '折叠 32509' })).toBeNull();
+    await waitForExportEnabled('导出 JSON');
+    fireEvent.click(screen.getByRole('button', { name: '导出 JSON' }));
+
+    expect(captured[0]?.fields).toHaveLength(510);
+    expect(captured[0]?.fields.some((field) => field.key === '74-32509-物品数量')).toBe(true);
+    expect(downloadMocks.click).toHaveBeenCalledTimes(1);
+  }, 20000);
+
+  it('uses warmed cache without loading flicker under React StrictMode remounts', async () => {
+    vi.useFakeTimers();
+    const points: TimePoint[] = [
+      { index: 0, timestamp: new Date('2026-03-20T10:05:00Z'), changes: [change('74-33001-物品数量', '100', '50')] },
+    ];
+    const inferSpy = vi.spyOn(recoveryInference, 'inferRecoveryFragments');
+
+    const first = render(React.createElement(React.StrictMode, null, React.createElement(RecoveryPanel, { fileName: 'strict.csv', timePoints: points, selectedIndex: 0, view: 'workspace' })));
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(screen.getByRole('button', { name: '折叠 33001' })).toBeTruthy();
+    const warmCallCount = inferSpy.mock.calls.length;
+    expect(warmCallCount).toBeGreaterThan(0);
+    first.unmount();
+
+    render(React.createElement(React.StrictMode, null, React.createElement(RecoveryPanel, { fileName: 'strict.csv', timePoints: points, selectedIndex: 0, view: 'workspace' })));
+
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.getByRole('button', { name: '折叠 33001' })).toBeTruthy();
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(inferSpy).toHaveBeenCalledTimes(warmCallCount);
+  }, 20000);
 
   it('uses the optional end time to filter the preview window', async () => {
     const points: TimePoint[] = [
