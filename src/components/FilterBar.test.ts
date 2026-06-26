@@ -54,7 +54,7 @@ function renderFilterBar(overrides: Partial<React.ComponentProps<typeof FilterBa
     loading: false,
     fileName: 'player.csv',
     onDownloadClean: vi.fn(),
-    onOpenRecovery: vi.fn(),
+    onToggleRecovery: vi.fn(),
     ...overrides,
   };
   render(React.createElement(FilterBar, props));
@@ -62,7 +62,7 @@ function renderFilterBar(overrides: Partial<React.ComponentProps<typeof FilterBa
 }
 
 describe('FilterBar recovery action', () => {
-  it('places 存档回退 immediately before the clean CSV download action', () => {
+  it('places the recovery toggle immediately before the clean CSV download action', () => {
     renderFilterBar();
 
     const actions = document.querySelector('.diff-context-toolbar__actions');
@@ -74,12 +74,19 @@ describe('FilterBar recovery action', () => {
     expect(names.indexOf('存档回退')).toBe(names.indexOf('下载整理后的 CSV') - 1);
   });
 
-  it('opens the recovery workspace from the toolbar button', () => {
+  it('toggles the recovery workspace from the toolbar button', () => {
     const props = renderFilterBar();
 
     fireEvent.click(screen.getByRole('button', { name: '存档回退' }));
 
-    expect(props.onOpenRecovery).toHaveBeenCalledTimes(1);
+    expect(props.onToggleRecovery).toHaveBeenCalledTimes(1);
+  });
+
+  it('renames the recovery toggle when already in recovery mode', () => {
+    renderFilterBar({ isRecoveryWorkspace: true });
+
+    expect(screen.getByRole('button', { name: '查看存档变动' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '存档回退' })).toBeNull();
   });
 
   it('disables 存档回退 when no file is loaded', () => {

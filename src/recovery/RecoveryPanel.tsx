@@ -13,7 +13,6 @@ interface RecoveryPanelProps {
   selectedIndex: number;
   view?: 'entry' | 'workspace';
   onOpen?: () => void;
-  onClose?: () => void;
 }
 
 type ExportFormat = 'csv' | 'json';
@@ -154,7 +153,6 @@ export const RecoveryPanel: React.FC<RecoveryPanelProps> = ({
   selectedIndex,
   view = 'workspace',
   onOpen,
-  onClose,
 }) => {
   const selectedTimePoint = timePoints[selectedIndex] ?? timePoints[0] ?? null;
   const firstTimePoint = timePoints[0] ?? selectedTimePoint;
@@ -237,8 +235,6 @@ export const RecoveryPanel: React.FC<RecoveryPanelProps> = ({
     downloadTextFile(`${baseName}_recovery.json`, serializeRecoveryJson(recovery), 'application/json;charset=utf-8');
   };
 
-  const provenCount = recovery?.fields.filter((field) => field.evidenceStatus === 'proven').length ?? 0;
-  const insufficientCount = recovery?.fields.filter((field) => field.evidenceStatus === 'evidence-insufficient').length ?? 0;
   const isRecoveryLoading = recoveryRequest !== null && !recovery;
   const exportDisabled = hasAidConflict || isRecoveryLoading || !recovery || recovery.fields.length === 0;
   const previewFieldBudget = previewBudgetState.requestKey === recoveryRequestKey
@@ -250,6 +246,9 @@ export const RecoveryPanel: React.FC<RecoveryPanelProps> = ({
   );
   const previewFragments = visiblePreview.fragments;
   const canShowMorePreview = Boolean(recovery && visiblePreview.hiddenFieldCount > 0);
+  const previewSummary = recovery && recovery.fields.length > 0
+    ? `当前预览展示 ${visiblePreview.visibleFragmentCount} / ${recovery.fragments.length} 个槽位片段、${visiblePreview.visibleFieldCount} / ${recovery.fields.length} 个字段；CSV / JSON 导出包含全部字段。`
+    : null;
 
   const handleShowMorePreview = () => {
     setPreviewBudgetState({
@@ -272,32 +271,33 @@ export const RecoveryPanel: React.FC<RecoveryPanelProps> = ({
 
   return (
     <section className="recovery-panel recovery-panel--workspace" aria-label="存档回退输入生成">
-      <div className="recovery-panel__summary">
-        <div>
-          <div className="recovery-panel__eyebrow">存档回退输入生成</div>
-          <div className="recovery-panel__title">生成可审核的 CSV / JSON 恢复输入，不会写回存档</div>
-          <div className="recovery-panel__meta">
-            {hasAidConflict
-              ? `检测到多个日志 aid（${aidConflict.join('、')}），V1 不支持混合玩家导出`
-              : isRecoveryLoading
-                ? `正在分析 ${fileName} 的回退字段，请稍候…`
-                : `玩家标识：${recovery?.identity.playerLabel ?? fileName}（${recovery?.identity.playerIdentifierSource === 'aid-from-log' ? '日志 aid' : '文件名'}） · 已证明字段 ${provenCount} · 证据不足 ${insufficientCount}`}
+      <div className="recovery-panel__toolbar">
+        <div className="recovery-panel__summary recovery-panel__summary--compact">
+          <div className="recovery-panel__heading">
+            <div className="recovery-panel__title-row">
+              <div className="recovery-panel__title">存档回退</div>
+              <div className="recovery-panel__warning recovery-panel__warning--title">不写回存档；V1 只输出日志能证明的字段；不补全 schema；导出供后续工具/人工审核。</div>
+            </div>
+            <div className="recovery-panel__meta" aria-live="polite">
+              {hasAidConflict
+                ? `检测到多个日志 aid（${aidConflict.join('、')}），V1 不支持混合玩家导出`
+                : isRecoveryLoading
+                  ? `正在分析 ${fileName} 的回退字段，请稍候…`
+                  : previewSummary}
+            </div>
+          </div>
+          <div className="recovery-panel__actions">
+            <button type="button" className="recovery-panel__button recovery-panel__button--primary" onClick={() => handleExport('csv')} disabled={exportDisabled}>导出 CSV</button>
+            <button type="button" className="recovery-panel__button recovery-panel__button--primary" onClick={() => handleExport('json')} disabled={exportDisabled}>导出 JSON</button>
           </div>
         </div>
-        <div className="recovery-panel__actions">
-          {onClose && <button type="button" className="recovery-panel__button" onClick={onClose}>返回变动对比</button>}
-          <button type="button" className="recovery-panel__button" onClick={handleSeedFromSelected}>用当前时间</button>
-          <button type="button" className="recovery-panel__button recovery-panel__button--primary" onClick={() => handleExport('csv')} disabled={exportDisabled}>导出 CSV</button>
-          <button type="button" className="recovery-panel__button recovery-panel__button--primary" onClick={() => handleExport('json')} disabled={exportDisabled}>导出 JSON</button>
-        </div>
-      </div>
 
-      <div className="recovery-panel__body">
-          <div className="recovery-panel__controls">
+        <div className="recovery-panel__controls recovery-panel__controls--compact">
             <label>
               <span>回退起点</span>
               <input type="datetime-local" step="1" value={targetValue} onChange={(event) => setTargetOverride(event.target.value)} />
             </label>
+            <button type="button" className="recovery-panel__button recovery-panel__button--time-axis" onClick={handleSeedFromSelected}>用时间轴所处时间</button>
             <label className="recovery-panel__checkbox">
               <input type="checkbox" checked={endEnabled} onChange={(event) => setEndEnabled(event.target.checked)} />
               <span>启用结束时间</span>
@@ -306,26 +306,15 @@ export const RecoveryPanel: React.FC<RecoveryPanelProps> = ({
               <span>结束时间</span>
               <input type="datetime-local" step="1" value={endValue} disabled={!endEnabled} onChange={(event) => setEndValue(event.target.value)} />
             </label>
+            {isRecoveryLoading && (
+              <div className="recovery-panel__preview-summary recovery-panel__preview-summary--inline" role="status" aria-live="polite">
+                正在生成回退预览，完成前暂不可导出。
+              </div>
+            )}
           </div>
+      </div>
 
-          <div className="recovery-panel__warning">
-            {hasAidConflict
-              ? '当前 CSV 包含多个玩家 aid。为避免把多个玩家的变动误标为同一玩家，V1 会阻止存档回退；请先导入单个玩家的日志。'
-              : '默认从当前导入日志的最早时间开始扫描；点击“用当前时间”才会改用时间轴当前帧作为回退起点。V1 只输出日志能证明的字段；没有内置槽位 schema，不会凭空补全缺失字段。导出文件仅供后续工具/人工审核使用，本应用不写回任何存档。'}
-          </div>
-
-          {isRecoveryLoading && (
-            <div className="recovery-panel__preview-summary" role="status" aria-live="polite">
-              正在生成回退预览，完成前暂不可导出。
-            </div>
-          )}
-
-          {!isRecoveryLoading && recovery && recovery.fields.length > 0 && (
-            <div className="recovery-panel__preview-summary" aria-live="polite">
-              当前预览展示 {visiblePreview.visibleFragmentCount} / {recovery.fragments.length} 个槽位片段、{visiblePreview.visibleFieldCount} / {recovery.fields.length} 个字段；CSV / JSON 导出仍包含全部字段。
-            </div>
-          )}
-
+      <div className="recovery-panel__body">
           <div className="recovery-panel__preview" aria-label="回退槽位片段预览">
             {isRecoveryLoading ? (
               <div className="recovery-panel__empty">正在生成回退预览…</div>

@@ -86,14 +86,14 @@ describe('RecoveryPanel', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it('renders safety copy and filename identity in the recovery workspace', async () => {
+  it('renders safety copy and compact preview status in the recovery workspace', async () => {
     render(React.createElement(RecoveryPanel, { fileName: 'player abc.csv', timePoints, selectedIndex: 0, view: 'workspace' }));
 
     expect(screen.getByLabelText('存档回退输入生成')).toBeTruthy();
-    expect(screen.getByText(/不会写回存档/)).toBeTruthy();
+    expect(screen.getByText(/不写回存档/)).toBeTruthy();
     expect(screen.getByRole('status').textContent).toContain('正在生成回退预览，完成前暂不可导出。');
     expect(screen.getByRole('button', { name: '导出 CSV' })).toHaveProperty('disabled', true);
-    await screen.findByText(/玩家标识：player abc.csv/);
+    await screen.findByText(/当前预览展示 1 \/ 1 个槽位片段、1 \/ 1 个字段/);
   });
 
   it('keeps exports disabled while scheduled inference is loading, then enables them when ready', async () => {
@@ -132,8 +132,7 @@ describe('RecoveryPanel', () => {
   it('renders aid provenance when raw log metadata supplied an aid', async () => {
     render(React.createElement(RecoveryPanel, { fileName: 'player abc.csv', aid: '30344223', timePoints, selectedIndex: 0, view: 'workspace' }));
 
-    await screen.findByText(/玩家标识：30344223/);
-    expect(screen.getByText(/日志 aid/)).toBeTruthy();
+    await screen.findByText(/当前预览展示 1 \/ 1 个槽位片段、1 \/ 1 个字段/);
   });
 
   it('shows proven recovery fields as an expandable JSON-like tree', async () => {
@@ -191,7 +190,7 @@ describe('RecoveryPanel', () => {
     ];
     render(React.createElement(RecoveryPanel, { fileName: 'player abc.csv', timePoints: points, selectedIndex: 1, view: 'workspace' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '用当前时间' }));
+    fireEvent.click(screen.getByRole('button', { name: '用时间轴所处时间' }));
 
     expect(screen.getByLabelText('回退起点')).toHaveProperty('value', localValue(points[1].timestamp));
     await screen.findByRole('button', { name: '折叠 20008' });
@@ -311,7 +310,7 @@ describe('RecoveryPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /显示更多回退字段/ }));
     expect(await screen.findByText(/510 \/ 510 个字段/)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '用当前时间' }));
+    fireEvent.click(screen.getByRole('button', { name: '用时间轴所处时间' }));
 
     expect(await screen.findByText(/1 \/ 1 个字段/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /显示更多回退字段/ })).toBeNull();
@@ -407,7 +406,7 @@ describe('RecoveryPanel', () => {
     expect(screen.getByText(/检测到多个日志 aid/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '导出 CSV' })).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: '导出 JSON' })).toHaveProperty('disabled', true);
-    expect(screen.getByText(/请先导入单个玩家的日志/)).toBeTruthy();
+    expect(screen.getByText(/V1 不支持混合玩家导出/)).toBeTruthy();
   });
 
   it('exports JSON with aid provenance and no-write-back marker', async () => {
@@ -441,13 +440,11 @@ describe('RecoveryPanel', () => {
     expect(downloadMocks.click).toHaveBeenCalledTimes(1);
   });
 
-  it('renders a return action in workspace mode when provided', () => {
-    const onClose = vi.fn();
-    render(React.createElement(RecoveryPanel, { fileName: 'player abc.csv', timePoints, selectedIndex: 0, view: 'workspace', onClose }));
+  it('omits the return action because the toolbar owns recovery mode switching', () => {
+    render(React.createElement(RecoveryPanel, { fileName: 'player abc.csv', timePoints, selectedIndex: 0, view: 'workspace' }));
 
-    fireEvent.click(screen.getByRole('button', { name: '返回变动对比' }));
-
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '返回变动对比' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '查看存档变动' })).toBeNull();
   });
 
   it('does not render without diff data', () => {
