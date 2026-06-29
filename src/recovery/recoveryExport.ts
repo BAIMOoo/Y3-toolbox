@@ -1,52 +1,41 @@
 import type { RecoveryFieldEntry, RecoveryInferenceResult } from './recoveryInference';
 
-const CSV_HEADERS = [
-  'playerLabel',
-  'playerId',
-  'playerIdentifierSource',
-  'slotPrefix',
-  'fullKey',
-  'fieldLabel',
-  'recoveryValue',
-  'observedNewValue',
-  'sourceTimestamp',
-  'changeType',
-  'evidenceStatus',
-  'groupingStrategy',
-  'groupingConfidence',
-  'expectedSchemaSource',
-  'writeBackSupported',
-];
-
-export function serializeRecoveryCsv(result: RecoveryInferenceResult): string {
-  const rows = [CSV_HEADERS.join(',')];
-  for (const fragment of result.fragments) {
-    const fields = [...fragment.fields].sort(compareExportFields);
-    for (const field of fields) {
-      rows.push([
-        result.identity.playerLabel,
-        result.identity.playerId ?? '',
-        result.identity.playerIdentifierSource,
-        fragment.slotPrefix,
-        field.key,
-        field.fieldLabel,
-        field.recoveryValue ?? '',
-        field.observedNewValue ?? '',
-        field.sourceTimestamp ?? '',
-        field.changeType ?? '',
-        field.evidenceStatus,
-        fragment.groupingStrategy,
-        fragment.groupingConfidence,
-        result.expectedSchemaSource,
-        String(result.writeBackSupported),
-      ].map(escapeCsvValue).join(','));
-    }
-  }
-  return `${rows.join('\n')}\n`;
+interface ArchiveJsonTypedValue<T> {
+  type: string;
+  value: T;
 }
 
+interface ArchiveJsonSlot {
+  day_value: ArchiveJsonTypedValue<number>;
+  data_value: ArchiveJsonTypedValue<unknown>;
+  data_type: ArchiveJsonTypedValue<number>;
+}
+
+type ArchiveJsonExport = Record<string, ArchiveJsonSlot>;
+type MutableJsonObject = Record<string, unknown>;
+
 export function serializeRecoveryJson(result: RecoveryInferenceResult): string {
-  return `${JSON.stringify(sortRecoveryResult(result), null, 2)}\n`;
+  return `${JSON.stringify(buildRecoveryArchiveJson(result), null, 2)}\n`;
+}
+
+export function buildRecoveryArchiveJson(result: RecoveryInferenceResult): ArchiveJsonExport {
+  const archive: ArchiveJsonExport = {};
+  const fields = [...result.fields]
+    .filter((field) => field.evidenceStatus === 'proven' && field.recoveryValue !== null)
+    .sort(compareExportFields);
+
+  for (const field of fields) {
+    const keyParts = field.key.split('-').filter(Boolean);
+    if (keyParts.length === 0) continue;
+
+    const [rootSlotId, ...nestedPath] = keyParts;
+    const slot = archive[rootSlotId] ?? createArchiveJsonSlot();
+    archive[rootSlotId] = slot;
+
+    slot.data_value.value = setRecoveryValueAtPath(slot.data_value.value, nestedPath, field.recoveryValue ?? '');
+  }
+
+  return sortArchiveJsonSlots(archive);
 }
 
 export function buildRecoveryExportBaseName(fileName: string): string {
@@ -56,28 +45,82 @@ export function buildRecoveryExportBaseName(fileName: string): string {
     .replace(/^_+|_+$/g, '') || 'archive_recovery';
 }
 
-export function escapeCsvValue(value: string): string {
-  const escaped = value.replace(/"/g, '""');
-  if (/[",\n\r]/.test(value)) return `"${escaped}"`;
-  return escaped;
+function createArchiveJsonSlot(): ArchiveJsonSlot {
+  return {
+    day_value: { type: 'int', value: 0 },
+    data_value: { type: 'str', value: {} },
+    data_type: { type: 'int', value: 4 },
+  };
 }
 
-function sortRecoveryResult(result: RecoveryInferenceResult): RecoveryInferenceResult {
-  const fragments = [...result.fragments]
-    .sort((a, b) => a.slotPrefix.localeCompare(b.slotPrefix))
-    .map((fragment) => ({
-      ...fragment,
-      fields: [...fragment.fields].sort(compareExportFields),
-    }));
-  return {
-    ...result,
-    fragments,
-    fields: [...result.fields].sort(compareExportFields),
-  };
+function setRecoveryValueAtPath(currentValue: unknown, nestedPath: string[], recoveryValue: string): unknown {
+  if (nestedPath.length === 0) return recoveryValue;
+
+  const root = isMutableJsonObject(currentValue) ? currentValue : {};
+  let cursor: MutableJsonObject = root;
+
+  for (let index = 0; index < nestedPath.length - 1; index += 1) {
+    const part = nestedPath[index];
+    const next = cursor[part];
+    if (isMutableJsonObject(next)) {
+      cursor = next;
+    } else {
+      const child: MutableJsonObject = {};
+      cursor[part] = child;
+      cursor = child;
+    }
+  }
+
+  cursor[nestedPath[nestedPath.length - 1]] = recoveryValue;
+  return root;
+}
+
+function sortArchiveJsonSlots(archive: ArchiveJsonExport): ArchiveJsonExport {
+  const sorted: ArchiveJsonExport = {};
+  for (const slotId of Object.keys(archive).sort(slotSortCompare)) {
+    sorted[slotId] = {
+      ...archive[slotId],
+      data_value: {
+        ...archive[slotId].data_value,
+        value: sortJsonValue(archive[slotId].data_value.value),
+      },
+    };
+  }
+  return sorted;
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJsonValue);
+  if (!isMutableJsonObject(value)) return value;
+
+  const sorted: MutableJsonObject = {};
+  for (const key of Object.keys(value).sort(slotSortCompare)) {
+    sorted[key] = sortJsonValue(value[key]);
+  }
+  return sorted;
+}
+
+function isMutableJsonObject(value: unknown): value is MutableJsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function compareExportFields(a: RecoveryFieldEntry, b: RecoveryFieldEntry): number {
   return a.slotPrefix.localeCompare(b.slotPrefix)
     || a.key.localeCompare(b.key)
     || String(a.sourceTimestamp ?? '').localeCompare(String(b.sourceTimestamp ?? ''));
+}
+
+function slotSortCompare(left: string, right: string): number {
+  const leftNumber = numericSlotId(left);
+  const rightNumber = numericSlotId(right);
+  if (leftNumber !== null && rightNumber !== null) return leftNumber - rightNumber;
+  if (leftNumber !== null) return -1;
+  if (rightNumber !== null) return 1;
+  return left.localeCompare(right);
+}
+
+function numericSlotId(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
