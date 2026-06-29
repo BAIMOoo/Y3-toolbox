@@ -62,6 +62,45 @@ describe('parseArchiveDiff', () => {
     expect(parseArchiveDiff('')).toEqual([]);
   });
 
+
+  describe('UTF-8 hex escape decoding', () => {
+    it('decodes Python-style UTF-8 hex escapes in values', () => {
+      const changes = parseArchiveDiff("|89-12514={'\\xe6\\xa0\\x8f\\xe4\\xbd\\x8d1': 0, '\\xe6\\xb4\\x97\\xe7\\xbb\\x83ID': 7}>>>nil");
+
+      expect(changes[0].oldValue).toBe("{'栏位1': 0, '洗练ID': 7}");
+      expect(changes[0].newValue).toBe('nil');
+    });
+
+    it('decodes UTF-8 hex escapes in keys before deriving key parts', () => {
+      const changes = parseArchiveDiff('|89-12514-\\xe6\\xa0\\x8f\\xe4\\xbd\\x8d1=0>>>1');
+
+      expect(changes[0].key).toBe('89-12514-栏位1');
+      expect(changes[0].keyParts).toEqual(['89', '12514', '栏位1']);
+      expect(changes[0].rootKey).toBe('89');
+    });
+
+    it('leaves non-hex escapes untouched', () => {
+      const changes = parseArchiveDiff('|1=line\\ntext>>>line\\ttext');
+
+      expect(changes[0].oldValue).toBe('line\\ntext');
+      expect(changes[0].newValue).toBe('line\\ttext');
+    });
+
+    it('leaves invalid UTF-8 hex byte sequences untouched', () => {
+      const changes = parseArchiveDiff('|1=bad\\xfftext>>>ok');
+
+      expect(changes[0].oldValue).toBe('bad\\xfftext');
+    });
+
+    it('decodes the real recovery CSV byte-escaped table sample', () => {
+      const changes = parseArchiveDiff("|89-12355={'\\xe6\\xa0\\x8f\\xe4\\xbd\\x8d1': 0, '\\xe6\\x98\\xaf\\xe5\\x90\\xa6\\xe9\\x94\\x81\\xe5\\xae\\x9a': 0, '\\xe8\\x83\\x8c\\xe5\\x8c\\x85\\xe4\\xbd\\x8d\\xe7\\xbd\\xae': 56}>>nil>>>3>>0");
+
+      expect(changes[0].oldValue).toContain("'栏位1': 0");
+      expect(changes[0].oldValue).toContain("'是否锁定': 0");
+      expect(changes[0].oldValue).toContain("'背包位置': 56");
+    });
+  });
+
   describe('platform limit metadata', () => {
     it('keeps bracketed dv/max metadata from splitting into fake archive keys', () => {
       const changes = parseArchiveDiff(
