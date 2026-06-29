@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { TimePoint } from '../types';
-import { buildRecoveryExportBaseName, serializeRecoveryCsv, serializeRecoveryJson } from './recoveryExport';
+import { buildRecoveryExportBaseName, serializeRecoveryJson } from './recoveryExport';
 import { inferRecoveryFragments, type RecoveryInferenceResult, type RecoverySlotFragment } from './recoveryInference';
 import { RecoveryPreviewTree } from './RecoveryPreviewTree';
 
@@ -15,7 +15,6 @@ interface RecoveryPanelProps {
   onOpen?: () => void;
 }
 
-type ExportFormat = 'csv' | 'json';
 
 const RECOVERY_PREVIEW_INITIAL_FIELD_BUDGET = 500;
 const RECOVERY_PREVIEW_FIELD_BUDGET_INCREMENT = 500;
@@ -226,12 +225,8 @@ export const RecoveryPanel: React.FC<RecoveryPanelProps> = ({
     setTargetOverride(selectedTargetValue);
   };
 
-  const handleExport = (format: ExportFormat) => {
+  const handleExportJson = () => {
     if (!recovery || hasAidConflict) return;
-    if (format === 'csv') {
-      downloadTextFile(`${baseName}_recovery.csv`, serializeRecoveryCsv(recovery), 'text/csv;charset=utf-8');
-      return;
-    }
     downloadTextFile(`${baseName}_recovery.json`, serializeRecoveryJson(recovery), 'application/json;charset=utf-8');
   };
 
@@ -247,7 +242,7 @@ export const RecoveryPanel: React.FC<RecoveryPanelProps> = ({
   const previewFragments = visiblePreview.fragments;
   const canShowMorePreview = Boolean(recovery && visiblePreview.hiddenFieldCount > 0);
   const previewSummary = recovery && recovery.fields.length > 0
-    ? `当前预览展示 ${visiblePreview.visibleFragmentCount} / ${recovery.fragments.length} 个槽位片段、${visiblePreview.visibleFieldCount} / ${recovery.fields.length} 个字段；CSV / JSON 导出包含全部字段。`
+    ? `当前预览展示 ${visiblePreview.visibleFragmentCount} / ${recovery.fragments.length} 个槽位片段、${visiblePreview.visibleFieldCount} / ${recovery.fields.length} 个字段；JSON 导出包含全部字段。`
     : null;
 
   const handleShowMorePreview = () => {
@@ -287,8 +282,7 @@ export const RecoveryPanel: React.FC<RecoveryPanelProps> = ({
             </div>
           </div>
           <div className="recovery-panel__actions">
-            <button type="button" className="recovery-panel__button recovery-panel__button--primary" onClick={() => handleExport('csv')} disabled={exportDisabled}>导出 CSV</button>
-            <button type="button" className="recovery-panel__button recovery-panel__button--primary" onClick={() => handleExport('json')} disabled={exportDisabled}>导出 JSON</button>
+            <button type="button" className="recovery-panel__button recovery-panel__button--primary" onClick={handleExportJson} disabled={exportDisabled}>导出 JSON</button>
           </div>
         </div>
 

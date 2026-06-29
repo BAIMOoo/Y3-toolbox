@@ -60,8 +60,8 @@ async function waitForRecoveryPreview(text?: string) {
   await screen.findByRole('tree', { name: '回退 JSON 树预览' });
 }
 
-async function waitForExportEnabled(label: '导出 CSV' | '导出 JSON') {
-  await waitFor(() => expect(screen.getByRole('button', { name: label })).toHaveProperty('disabled', false));
+async function waitForJsonExportEnabled() {
+  await waitFor(() => expect(screen.getByRole('button', { name: '导出 JSON' })).toHaveProperty('disabled', false));
 }
 
 const timePoints: TimePoint[] = [
@@ -92,21 +92,22 @@ describe('RecoveryPanel', () => {
     expect(screen.getByLabelText('存档回退输入生成')).toBeTruthy();
     expect(screen.getByText(/不写回存档/)).toBeTruthy();
     expect(screen.getByRole('status').textContent).toContain('正在生成回退预览，完成前暂不可导出。');
-    expect(screen.getByRole('button', { name: '导出 CSV' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: '导出 CSV' })).toBeNull();
     await screen.findByText(/当前预览展示 1 \/ 1 个槽位片段、1 \/ 1 个字段/);
   });
 
-  it('keeps exports disabled while scheduled inference is loading, then enables them when ready', async () => {
+  it('keeps JSON export disabled while scheduled inference is loading, then enables it when ready', async () => {
     render(React.createElement(RecoveryPanel, { fileName: 'player abc.csv', timePoints, selectedIndex: 0, view: 'workspace' }));
 
     expect(screen.getByRole('status').textContent).toContain('正在生成回退预览，完成前暂不可导出。');
     expect(screen.getByText('正在生成回退预览…')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '导出 CSV' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: '导出 CSV' })).toBeNull();
 
     await waitForRecoveryPreview();
 
     expect(screen.queryByRole('status')).toBeNull();
-    expect(screen.getByRole('button', { name: '导出 CSV' })).toHaveProperty('disabled', false);
+    expect(screen.queryByRole('button', { name: '导出 CSV' })).toBeNull();
+    expect(screen.getByRole('button', { name: '导出 JSON' })).toHaveProperty('disabled', false);
   });
 
   it('ignores a stale scheduled inference after inputs change', async () => {
@@ -332,7 +333,7 @@ describe('RecoveryPanel', () => {
     render(React.createElement(RecoveryPanel, { fileName: 'full-export.csv', timePoints: manyPoints, selectedIndex: 0, view: 'workspace' }));
     await screen.findByText(/500 \/ 510 个字段/);
     expect(screen.queryByRole('button', { name: '折叠 32509' })).toBeNull();
-    await waitForExportEnabled('导出 JSON');
+    await waitForJsonExportEnabled();
     fireEvent.click(screen.getByRole('button', { name: '导出 JSON' }));
 
     expect(captured[0]?.fields).toHaveLength(510);
@@ -404,12 +405,12 @@ describe('RecoveryPanel', () => {
     }));
 
     expect(screen.getByText(/检测到多个日志 aid/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: '导出 CSV' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: '导出 CSV' })).toBeNull();
     expect(screen.getByRole('button', { name: '导出 JSON' })).toHaveProperty('disabled', true);
     expect(screen.getByText(/V1 不支持混合玩家导出/)).toBeTruthy();
   });
 
-  it('exports JSON with aid provenance and no-write-back marker', async () => {
+  it('exports JSON through the recovery serializer', async () => {
     const downloadMocks = installDownloadMocks();
     const captured: RecoveryInferenceResult[] = [];
     vi.spyOn(recoveryExport, 'serializeRecoveryJson').mockImplementation((result) => {
@@ -418,7 +419,7 @@ describe('RecoveryPanel', () => {
     });
 
     render(React.createElement(RecoveryPanel, { fileName: 'player abc.csv', aid: '30344223', timePoints, selectedIndex: 0, view: 'workspace' }));
-    await waitForExportEnabled('导出 JSON');
+    await waitForJsonExportEnabled();
     fireEvent.click(screen.getByRole('button', { name: '导出 JSON' }));
 
     expect(captured[0]?.identity).toMatchObject({ playerId: '30344223', playerIdentifierSource: 'aid-from-log' });
@@ -428,16 +429,12 @@ describe('RecoveryPanel', () => {
     expect(downloadMocks.revokeObjectURL).toHaveBeenCalledWith('blob:recovery-download');
   });
 
-  it('exports CSV through the recovery serializer', async () => {
-    const downloadMocks = installDownloadMocks();
-    const serializeCsv = vi.spyOn(recoveryExport, 'serializeRecoveryCsv').mockReturnValue('playerIdentifierSource\naid-from-log\n');
-
+  it('does not render a CSV export action in the recovery workspace', async () => {
     render(React.createElement(RecoveryPanel, { fileName: 'player abc.csv', aid: '30344223', timePoints, selectedIndex: 0, view: 'workspace' }));
-    await waitForExportEnabled('导出 CSV');
-    fireEvent.click(screen.getByRole('button', { name: '导出 CSV' }));
+    await waitForJsonExportEnabled();
 
-    expect(serializeCsv).toHaveBeenCalledTimes(1);
-    expect(downloadMocks.click).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: '导出 CSV' })).toBeNull();
+    expect(screen.getByRole('button', { name: '导出 JSON' })).toBeTruthy();
   });
 
   it('omits the return action because the toolbar owns recovery mode switching', () => {
