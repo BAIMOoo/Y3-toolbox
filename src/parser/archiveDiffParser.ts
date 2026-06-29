@@ -55,6 +55,21 @@ function splitArchiveDiffEntries(diffStr: string): string[] {
   return entries;
 }
 
+
+function decodeUtf8HexEscapes(value: string): string {
+  return value.replace(/(?:\\x[0-9a-fA-F]{2})+/g, (sequence) => {
+    const bytes = sequence.match(/[0-9a-fA-F]{2}/g)?.map((hex) => Number.parseInt(hex, 16)) ?? [];
+    if (bytes.length === 0) return sequence;
+
+    try {
+      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes));
+      return decoded;
+    } catch {
+      return sequence;
+    }
+  });
+}
+
 function parseValueLimitMetadata(value: string): { value: string; metadata?: ArchiveLimitMetadata } {
   const metadataMatch = value.match(/\[dv:([^>\]]*)>>([^|\]]*)\|max:([^\]]*)\]$/);
   if (!metadataMatch) return { value };
@@ -77,7 +92,7 @@ export function parseArchiveDiff(diffStr: string): ArchiveChange[] {
     if (eqIndex === -1) {
       return { key: entry, keyParts: [entry], rootKey: entry, oldValue: '', newValue: '', changeType: 'update' as ChangeType };
     }
-    const key = entry.substring(0, eqIndex);
+    const key = decodeUtf8HexEscapes(entry.substring(0, eqIndex));
     const valuePart = entry.substring(eqIndex + 1);
 
     let oldValue: string, newValue: string;
@@ -110,8 +125,8 @@ export function parseArchiveDiff(diffStr: string): ArchiveChange[] {
 
     const oldParsed = parseValueLimitMetadata(oldValue);
     const newParsed = parseValueLimitMetadata(newValue);
-    oldValue = oldParsed.value;
-    newValue = newParsed.value;
+    oldValue = decodeUtf8HexEscapes(oldParsed.value);
+    newValue = decodeUtf8HexEscapes(newParsed.value);
     const limitMetadata = newParsed.metadata ?? oldParsed.metadata;
 
     const keyParts = key.split('-');

@@ -147,7 +147,30 @@ describe('RecoveryPanel', () => {
     expect(screen.getByRole('button', { name: '折叠 20007' })).toBeTruthy();
     expect(screen.getByText('物品数量')).toBeTruthy();
     expect(screen.getByText('100')).toBeTruthy();
-    expect(screen.getByText('已证明')).toBeTruthy();
+    expect(screen.getByText(/已证明 · 来源日志 .*:05:00/)).toBeTruthy();
+  });
+
+  it('expands structured table recovery values instead of squeezing them into one line', async () => {
+    const structuredPoints: TimePoint[] = [
+      {
+        index: 0,
+        timestamp: new Date('2026-06-14T00:05:53Z'),
+        changes: [change('3-10697', "{'栏位1': 0, '洗练槽位': '0；0；0；', '装备等级': 77, '评分': 'Fix32(929.75)'}", 'nil')],
+      },
+    ];
+
+    render(React.createElement(RecoveryPanel, { fileName: 'structured.csv', timePoints: structuredPoints, selectedIndex: 0, view: 'workspace' }));
+    await waitForRecoveryPreview('栏位1');
+
+    expect(screen.getByRole('button', { name: '折叠 10697' })).toBeTruthy();
+    expect(screen.getByText(/已证明 · 来源日志 .*:05:53/)).toBeTruthy();
+    expect(screen.getByText('栏位1')).toBeTruthy();
+    expect(screen.getByText('洗练槽位')).toBeTruthy();
+    expect(screen.getByText('0；0；0；')).toBeTruthy();
+    expect(screen.getByText('装备等级')).toBeTruthy();
+    expect(screen.getByText('77')).toBeTruthy();
+    expect(screen.getByText('评分')).toBeTruthy();
+    expect(screen.getByText('Fix32(929.75)')).toBeTruthy();
   });
 
   it('defaults to the imported log start so preview scans all loaded frames', async () => {
