@@ -48,6 +48,40 @@ class DefaultOutputDirTest(unittest.TestCase):
         self.assertEqual(subject.default_output_dir(args, players), Path(".") / "custom-output")
 
 
+class PlayerArgumentParsingTest(unittest.TestCase):
+    def test_single_players_flag_accepts_many_values(self) -> None:
+        parser = subject.create_arg_parser()
+
+        args = parser.parse_args([
+            "--players", "catplantt#8368", "落夜凋零#4915", "30334591",
+            "--map-id", "204521",
+            "--from", "2026.06.24-00:00:00",
+            "--to", "2026.06.29-00:24:39",
+        ])
+
+        self.assertEqual(
+            subject.flatten_player_args(args.players),
+            ["catplantt#8368", "落夜凋零#4915", "30334591"],
+        )
+
+    def test_repeated_players_flags_are_flattened_in_order(self) -> None:
+        parser = subject.create_arg_parser()
+
+        args = parser.parse_args([
+            "--players", "catplantt#8368",
+            "--players", "落夜凋零#4915",
+            "--players", "一剑可当万师#6427", "他们叫我阿盖#4591",
+            "--map-id", "204521",
+            "--from", "2026.06.24-00:00:00",
+            "--to", "2026.06.29-00:24:39",
+        ])
+
+        self.assertEqual(
+            subject.flatten_player_args(args.players),
+            ["catplantt#8368", "落夜凋零#4915", "一剑可当万师#6427", "他们叫我阿盖#4591"],
+        )
+
+
 class LogtailResolutionTest(unittest.TestCase):
     def test_windows_path_to_wsl_path(self) -> None:
         self.assertEqual(

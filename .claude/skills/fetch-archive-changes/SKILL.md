@@ -15,6 +15,8 @@ Use the bundled script for the whole operation. Do not rewrite ad hoc logtail lo
 2. Normalize the requested range to logtail format: `YYYY.MM.DD-HH:mm:ss`.
    - Treat the end time as exclusive. For April 7 through May 20 inclusive, use `2026.04.07-00:00:00` to `2026.05.21-00:00:00`.
 3. Run `scripts/fetch_archive_changes.py` with all players, required `--map-id`, and an output directory.
+   - Pass all players after one `--players` flag, for example `--players 'A#1111' 'B#2222' '30334591'`.
+   - The helper also accepts repeated `--players` flags for backward compatibility, but prefer the single-flag form to avoid shell/template mistakes.
    - Prefer grouped output directories under `archive-changes/` to avoid cluttering the project root.
    - If `--out-dir` is omitted, the script defaults to `archive-changes/archive-change-<date>-<n>players`.
    - In WSL, use the same command; the script auto-bridges Windows `logtail.exe` through `/init powershell.exe -File scripts/run_logtail.ps1` and auto-discovers `C:\Users\*\.logtail.conf` when available.
@@ -36,7 +38,7 @@ From the project root:
 
 ```bash
 PYTHONUTF8=1 python3 .claude/skills/fetch-archive-changes/scripts/fetch_archive_changes.py \
-  --players 'PlayerName#2678' \
+  --players 'PlayerName#2678' 'AnotherPlayer#1234' \
   --map-id '204521' \
   --from '2026.04.07-00:00:00' \
   --to '2026.05.21-00:00:00' \

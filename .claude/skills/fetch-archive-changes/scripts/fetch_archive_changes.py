@@ -765,9 +765,24 @@ def default_output_dir(args: argparse.Namespace, players: list[Player]) -> Path:
     return DEFAULT_OUTPUT_ROOT / f"archive-change{map_token}-{date_token}-{len(players)}players"
 
 
-def main() -> int:
+def flatten_player_args(values: Sequence[Sequence[str]] | None) -> list[str]:
+    if not values:
+        return []
+    players: list[str] = []
+    for group in values:
+        players.extend(item for item in group if item)
+    return players
+
+
+def create_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fetch per-player archive change logs from logtail.")
-    parser.add_argument("--players", nargs="+", required=True, help="Player nicknames, optionally with #suffix, or raw aid values.")
+    parser.add_argument(
+        "--players",
+        nargs="+",
+        action="append",
+        required=True,
+        help="Player nicknames, optionally with #suffix, or raw aid values. May be supplied once with many values or repeated.",
+    )
     parser.add_argument("--from", dest="from_time", required=True, help="Start time, e.g. 2026.05.14-00:00:00")
     parser.add_argument("--to", dest="to_time", required=True, help="Exclusive end time, e.g. 2026.05.15-00:00:00")
     parser.add_argument(
@@ -797,7 +812,13 @@ def main() -> int:
     parser.add_argument("--mail-mutt", default="", help="Optional mutt executable path. Defaults to .local-tools/mail/mutt, then PATH mutt.")
     parser.add_argument("--mail-muttrc", default="", help="Optional mutt config path. Defaults to .local-tools/mail/config/muttrc when present.")
     parser.add_argument("--email-timeout", type=int, default=120, help="Seconds to wait for mutt/msmtp to send email.")
+    return parser
+
+
+def main() -> int:
+    parser = create_arg_parser()
     args = parser.parse_args()
+    args.players = flatten_player_args(args.players)
 
     if args.primary_window_hours > 239:
         raise SystemExit("--primary-window-hours must stay below logtail's 10-day limit")
