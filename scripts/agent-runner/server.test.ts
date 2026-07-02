@@ -14,6 +14,7 @@ afterEach(async () => {
 
 const OWNER_A = 'owner-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const OWNER_B = 'owner-token-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const TEST_CLIENT_VERSION = '0.1.7';
 
 function ownerHeaders(ownerToken = OWNER_A) {
   return { 'Content-Type': 'application/json', 'X-Owner-Token': ownerToken };
@@ -102,7 +103,7 @@ describe('agent runner HTTP API', () => {
     const stale = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: TEST_CLIENT_VERSION }),
     });
     expect(stale.status).toBe(426);
 
@@ -135,13 +136,13 @@ describe('agent runner HTTP API', () => {
     const skills = await fetch(`${base}/api/skills`).then((res) => res.json()) as { skills: AgentSkillDefinition[] };
     expect(skills.skills.map((skill) => skill.id)).toEqual(['fetch-archive-changes', 'fetch-mismatch-logs', 'export-kkres-image']);
 
-    const rejected = await fetch(`${base}/api/jobs`, { method: 'POST', headers: ownerHeaders(), body: JSON.stringify({ skillId: 'bad', params: {}, clientVersion: '0.1.6' }) });
+    const rejected = await fetch(`${base}/api/jobs`, { method: 'POST', headers: ownerHeaders(), body: JSON.stringify({ skillId: 'bad', params: {}, clientVersion: TEST_CLIENT_VERSION }) });
     expect(rejected.status).toBe(400);
 
     const created = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: TEST_CLIENT_VERSION }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
     const id = created.job.id;
     let job = created.job;
@@ -163,7 +164,7 @@ describe('agent runner HTTP API', () => {
     const created = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: TEST_CLIENT_VERSION }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
     const id = created.job.id;
     let job = created.job;
@@ -269,7 +270,7 @@ describe('agent runner HTTP API', () => {
     const created = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: TEST_CLIENT_VERSION }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
     const id = created.job.id;
 
@@ -296,7 +297,7 @@ describe('agent runner HTTP API', () => {
     const created = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(OWNER_A),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: TEST_CLIENT_VERSION }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
 
     const ownerAJobs = await fetch(`${base}/api/jobs`, { headers: ownerHeaders(OWNER_A) }).then((res) => res.json()) as { jobs: AgentJobSummary[] };
@@ -326,7 +327,7 @@ describe('agent runner HTTP API', () => {
     const rejected = await fetch(`${base}/api/jobs`, {
       method: 'POST',
       headers: ownerHeaders(),
-      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6' }),
+      body: JSON.stringify({ skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: TEST_CLIENT_VERSION }),
     });
 
     expect(rejected.status).toBe(429);

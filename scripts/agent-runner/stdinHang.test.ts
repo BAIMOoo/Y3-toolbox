@@ -8,6 +8,7 @@ import type { AgentJobSummary } from '../../src/agentJobs/types';
 
 const servers: http.Server[] = [];
 const OWNER_TOKEN = 'owner-token-stdin-0001';
+const TEST_CLIENT_VERSION = '0.1.7';
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
@@ -61,7 +62,7 @@ describe('agent runner stdin handling', () => {
       body: JSON.stringify({
         skillId: 'fetch-archive-changes',
         params: { players: 'smoke', mapId: '204521', from: '2026.06.03-00:00:00', to: '2026.06.04-00:00:00' },
-        clientVersion: '0.1.6',
+        clientVersion: TEST_CLIENT_VERSION,
       }),
     }).then((res) => res.json()) as { job: AgentJobSummary };
 
