@@ -84,6 +84,28 @@ describe('AgentJobCenter beta warning copy contract', () => {
     expect(source).toContain(".endsWith('.kkres')");
   });
 
+
+  it('warns that failed archive-change downloads are partial while preserving zip-only filtering', () => {
+    const source = readFileSync(new URL('./AgentJobCenter.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('showPartialArchiveArtifactWarning');
+    expect(source).toContain("activeJob?.skillId === 'fetch-archive-changes'");
+    expect(source).toContain("activeJob.status === 'failed'");
+    expect(source).toContain('任务失败，但有部分下载包');
+    expect(source).toContain('只包含失败前已安全写出的部分归档变更证据');
+    expect(source).toContain('任务仍为失败状态');
+    expect(source).toContain("job.skillId === 'fetch-archive-changes' || job.skillId === 'fetch-mismatch-logs'");
+    expect(source).toContain(".endsWith('.zip')");
+  });
+
+  it('keeps the succeeded-without-download warning unchanged', () => {
+    const source = readFileSync(new URL('./AgentJobCenter.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("activeJob.status === 'succeeded' && activeJobDownloadArtifacts.length === 0");
+    expect(source).toContain('任务已完成，但没有可下载文件');
+    expect(source).toContain('任务服务未生成可下载的 ZIP/KKRES，或产物不适合在当前页面公开下载。请查看执行日志中的下载包/附件提示。');
+  });
+
   it('offers kkres image path picker and drag/drop helpers without adding extra submitted fields', () => {
     const source = readFileSync(new URL('./AgentJobCenter.tsx', import.meta.url), 'utf8');
 

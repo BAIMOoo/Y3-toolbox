@@ -16,6 +16,8 @@ import type { AgentArtifactDownloadProgress } from '../types/electron';
 
 const KKRES_IMPORT_SAFETY_TITLE = '导入前安全提醒';
 const KKRES_IMPORT_SAFETY_DESCRIPTION = '不要直接把生成的 KKRes 导入正式项目；请先导入测试项目确认资源管理器和 UI 编辑器显示正常，导入正式项目前请先做好项目备份。';
+const PARTIAL_ARCHIVE_ARTIFACT_WARNING_TITLE = '任务失败，但有部分下载包';
+const PARTIAL_ARCHIVE_ARTIFACT_WARNING_DESCRIPTION = '这个 ZIP 只包含失败前已安全写出的部分归档变更证据，内容可能不完整；任务仍为失败状态，请按失败日志重试或排查。';
 
 export function AgentJobCenter() {
   const [skills, setSkills] = useState<AgentSkillDefinition[]>([]);
@@ -44,6 +46,9 @@ export function AgentJobCenter() {
   const visibleActiveJobEvents = useMemo(() => filterUserVisibleJobEvents(activeJobEvents), [activeJobEvents]);
   const activeJobEventMeta = activeJob ? jobEventMeta[activeJob.id] : undefined;
   const activeJobDownloadArtifacts = useMemo(() => (activeJob ? visibleDownloadArtifacts(activeJob) : []), [activeJob]);
+  const showPartialArchiveArtifactWarning = activeJob?.skillId === 'fetch-archive-changes'
+    && activeJob.status === 'failed'
+    && activeJobDownloadArtifacts.length > 0;
   const compatibility = useMemo(() => evaluateAgentCompatibility(health?.release), [health]);
   const maintenanceSubmitBlocked = Boolean(health?.queue.submissionsDisabled);
   const showCompatibilityAlert = !bootstrapLoading && compatibility.submitBlocked;
@@ -400,6 +405,15 @@ export function AgentJobCenter() {
                 ))}
               </Space>
               {artifactDownloadProgress && <ArtifactDownloadProgressPanel progress={artifactDownloadProgress} />}
+              {showPartialArchiveArtifactWarning && (
+                <Alert
+                  className="agent-job-partial-artifact-alert"
+                  type="warning"
+                  showIcon
+                  message={PARTIAL_ARCHIVE_ARTIFACT_WARNING_TITLE}
+                  description={PARTIAL_ARCHIVE_ARTIFACT_WARNING_DESCRIPTION}
+                />
+              )}
               {activeJob.status === 'succeeded' && activeJobDownloadArtifacts.length === 0 && (
                 <Alert
                   type="warning"
