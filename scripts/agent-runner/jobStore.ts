@@ -18,6 +18,9 @@ const JOB_STATE_VERSION = 1;
 const MAX_EVENT_RESPONSE = 500;
 const MAX_PUBLIC_ZIP_ARTIFACT_BYTES = 100 * 1024 * 1024;
 const PUBLIC_ARTIFACT_DIR = '.public-artifacts';
+const PARTIAL_ARCHIVE_ZIP_NAME = 'partial-archive-changes.zip';
+const SAFE_PARTIAL_ARCHIVE_FILE_NAMES = new Set(['fetch_summary.csv', 'aid_nickname_mapping.csv']);
+const SAFE_PARTIAL_ARCHIVE_SUFFIXES = ['_archive_changes.csv', '_fetch_summary.csv'];
 const WINDOWS_PATH_PATTERN = /[A-Za-z]:(?:\\\\|\\)[^\s;,)"]+/g;
 const UNC_PATH_PATTERN = /\\\\[^\s;,)"]+/g;
 const POSIX_MOUNT_PATH_PATTERN = /\/mnt\/[a-z]\/[^\s;,)"]+/g;
@@ -301,7 +304,6 @@ export class AgentJobStore {
     return { path: safe, name: artifact.name };
   }
 
-
   private pumpQueue(): void {
     while (this.runningCount < maxRunningJobsForConfig(this.config) && this.queue.length > 0) {
       const item = this.queue.shift();
@@ -320,18 +322,37 @@ export class AgentJobStore {
     await this.writeJobState(job);
     try {
       await fs.mkdir(command.outputDir, { recursive: true });
-      const result = await runCommand(command, this.config.maxCapturedOutputChars, job, this);
       const contract = AGENT_SKILL_CONTRACTS[job.skillId];
+      let result: RunCommandResult = { output: '', exitCode: 0 };
+      let commandError: Error | null = null;
+      try {
+        result = await runCommand(command, this.config.maxCapturedOutputChars, job, this);
+      } catch (err) {
+        commandError = err instanceof Error ? err : new Error(String(err));
+        result = { output: commandError.message, exitCode: 1 };
+      }
+
       const manifest = await readManifest(command.outputDir);
       await this.recordEvent(job, 'manifest-read', { message: `Manifest 已读取：${redactPublicText(manifest.summary)}` }, { updateState: false });
-      if (manifest.status !== 'succeeded') throw new Error(manifest.summary || 'Agent manifest reported failure');
       const artifactPaths = await manifestArtifactPaths(command.outputDir, manifest, contract.discoverArtifacts, contract.downloadableExtensions);
+
+      if (manifest.status !== 'succeeded' || commandError) {
+        if (isFailedArchiveArtifactRecoverable(job)) {
+          job.artifacts = await buildFailedArchiveArtifacts(job, artifactPaths);
+          if (job.artifacts.length > 0) {
+            await this.recordEvent(job, 'artifacts-validated', { message: `失败任务下载包恢复完成：${job.artifacts.length} 个候选文件` }, { updateState: false });
+          }
+        }
+        throw new Error(manifest.status !== 'succeeded' ? (manifest.summary || 'Agent manifest reported failure') : commandError?.message || 'Agent command failed');
+      }
+
       const validationErrors = await contract.validateSuccess({ output: result.output, outputDir: command.outputDir, artifacts: artifactPaths, manifest });
       if (validationErrors.length > 0) throw new Error(validationErrors.join('; '));
       await this.recordEvent(job, 'artifacts-validated', { message: `Artifact 校验完成：${artifactPaths.length} 个候选文件` }, { updateState: false });
       job.artifacts = await buildArtifacts(job, artifactPaths);
       await this.mark(job, 'succeeded', summarizeSuccess(manifest, result.output, job.artifacts.length));
     } catch (err) {
+      if (job.artifacts.length === 0) job.artifacts = await recoverFailedArchiveArtifacts(job);
       job.error = redactPublicText(err instanceof Error ? err.message : String(err));
       await this.mark(job, 'failed', `Agent 任务失败：${job.error}`);
     } finally {
@@ -359,7 +380,7 @@ export class AgentJobStore {
       }
       if (!job.sourceAggregateKey && job.sourceKey) job.sourceAggregateKey = job.sourceKey.replace(/:[^:]+$/, '');
       if (!job.sourceNetworkKey) job.sourceNetworkKey = restoredNetworkThrottleKey(job);
-      if (job.status === 'succeeded' && job.artifacts.length === 0) {
+      if ((job.status === 'succeeded' || isFailedArchiveArtifactRecoverable(job)) && job.artifacts.length === 0) {
         job.artifacts = await restorePublicArtifacts(job);
         if (job.artifacts.length > 0) await this.writeJobState(job);
       }
@@ -801,7 +822,132 @@ async function manifestArtifactPaths(outputDir: string, manifest: AgentResultMan
 }
 
 
+function isFailedArchiveArtifactRecoverable(job: StoredJob): boolean {
+  return job.skillId === 'fetch-archive-changes' && job.status !== 'succeeded';
+}
+
+async function recoverFailedArchiveArtifacts(job: StoredJob): Promise<InternalArtifact[]> {
+  if (!isFailedArchiveArtifactRecoverable(job)) return [];
+  return buildFailedArchiveArtifacts(job).catch(() => []);
+}
+
+async function buildFailedArchiveArtifacts(job: StoredJob, preferredArtifactPaths: string[] = []): Promise<InternalArtifact[]> {
+  let artifacts = await buildZipArtifacts(job, preferredArtifactPaths);
+  if (artifacts.length > 0) return artifacts;
+
+  const manifest = await readManifest(job.outputDir).catch(() => null);
+  const contract = AGENT_SKILL_CONTRACTS[job.skillId];
+  if (manifest) {
+    const manifestPaths = await manifestArtifactPaths(job.outputDir, manifest, contract.discoverArtifacts, contract.downloadableExtensions).catch(() => []);
+    artifacts = await buildZipArtifacts(job, manifestPaths);
+    if (artifacts.length > 0) return artifacts;
+  }
+
+  const discoveredPaths = await contract.discoverArtifacts(job.outputDir).catch(() => []);
+  artifacts = await buildZipArtifacts(job, discoveredPaths);
+  if (artifacts.length > 0) return artifacts;
+
+  const partialZip = await synthesizePartialArchiveChangesZip(job.outputDir);
+  return partialZip ? buildArtifacts(job, [partialZip]) : [];
+}
+
+async function buildZipArtifacts(job: StoredJob, files: string[]): Promise<InternalArtifact[]> {
+  const zipFiles = files.filter(isZipPath);
+  return zipFiles.length > 0 ? buildArtifacts(job, zipFiles) : [];
+}
+
+function isZipPath(file: string): boolean {
+  return path.extname(file).toLowerCase() === '.zip';
+}
+
+async function synthesizePartialArchiveChangesZip(outputDir: string): Promise<string | null> {
+  const evidenceFiles = await safePartialArchiveEvidenceFiles(outputDir);
+  if (evidenceFiles.length === 0) return null;
+  const zipPath = path.join(outputDir, PARTIAL_ARCHIVE_ZIP_NAME);
+  const entries = await Promise.all(evidenceFiles.map(async (file) => ({ name: path.basename(file), content: await fs.readFile(file) })));
+  await fs.writeFile(zipPath, createStoredZip(entries));
+  return zipPath;
+}
+
+async function safePartialArchiveEvidenceFiles(outputDir: string): Promise<string[]> {
+  const safeRoot = await fs.realpath(outputDir).catch(() => null);
+  if (!safeRoot) return [];
+  const entries = await fs.readdir(safeRoot, { withFileTypes: true }).catch(() => []);
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !isSafePartialArchiveEvidenceName(entry.name)) continue;
+    const full = path.join(safeRoot, entry.name);
+    const safe = await resolveUnder(safeRoot, full);
+    if (!safe) continue;
+    files.push(safe);
+  }
+  return files.sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
+}
+
+function isSafePartialArchiveEvidenceName(name: string): boolean {
+  const normalized = name.replace(/\\/g, '/');
+  if (normalized !== path.basename(normalized) || normalized.includes('..')) return false;
+  if (path.extname(normalized).toLowerCase() !== '.csv') return false;
+  return SAFE_PARTIAL_ARCHIVE_FILE_NAMES.has(normalized) || SAFE_PARTIAL_ARCHIVE_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
+}
+
+function createStoredZip(entries: Array<{ name: string; content: Buffer }>): Buffer {
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, 'utf8');
+    const content = entry.content;
+    const crc = crc32(content);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(content.length, 18);
+    local.writeUInt32LE(content.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    localParts.push(local, name, content);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(content.length, 20);
+    central.writeUInt32LE(content.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centralParts.push(central, name);
+    offset += local.length + name.length + content.length;
+  }
+  const centralOffset = offset;
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(centralSize, 12);
+  eocd.writeUInt32LE(centralOffset, 16);
+  return Buffer.concat([...localParts, ...centralParts, eocd]);
+}
+
+function crc32(buffer: Buffer): number {
+  let crc = ~0;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return ~crc >>> 0;
+}
+
 async function restorePublicArtifacts(job: StoredJob): Promise<InternalArtifact[]> {
+  if (isFailedArchiveArtifactRecoverable(job)) return buildFailedArchiveArtifacts(job);
   const contract = AGENT_SKILL_CONTRACTS[job.skillId];
   const manifest = await readManifest(job.outputDir).catch(() => null);
   if (!manifest || manifest.status !== 'succeeded') return job.artifacts;

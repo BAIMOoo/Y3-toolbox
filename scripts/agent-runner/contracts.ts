@@ -434,9 +434,10 @@ function archivePrompt(params: Record<string, unknown>, outputDir: string, confi
       `Archive-change specific requirements:`,
       `- Normalize or validate the supplied from/to range to YYYY.MM.DD-HH:mm:ss before invoking the skill helper.`,
       `- Use the job output directory as the helper output directory.`,
-      `- Keep CSV and summary files in the job output directory for evidence, but the final user-downloadable artifact must be only the generated .zip package.`,
-      `- Ensure result-manifest.json lists the .zip as the downloadable artifact; do not list loose CSV/TXT/log files as downloadable artifacts for this skill.`,
+      `- Keep CSV and summary files in the job output directory for evidence, but user-downloadable artifacts must be only .zip packages.`,
+      `- Ensure result-manifest.json lists only .zip downloadable artifacts; do not list loose CSV/TXT/log files as downloadable artifacts for this skill.`,
       `- The result is only successful when the generated zip exists and is non-empty.`,
+      `- If the archive fetch fails after writing useful CSV/summary evidence, status must remain failed, but a safe partial .zip may be listed as the only downloadable artifact; clearly mark the summary/warnings as partial and incomplete.`,
       `- Include matched log counts, first/last log time, and problem_windows in the manifest summary when available.`,
     ],
   });

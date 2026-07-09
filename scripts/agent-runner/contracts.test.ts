@@ -81,7 +81,7 @@ describe('agent runner skill contracts', () => {
     expect(execution.prompt).toContain(path.join(outputDir, 'progress.jsonl'));
     expect(execution.prompt).toContain('server-owned progress path');
     expect(execution.prompt).toContain('Normalize or validate the supplied from/to range');
-    expect(execution.prompt).toContain('final user-downloadable artifact must be only the generated .zip package');
+    expect(execution.prompt).toContain('user-downloadable artifacts must be only .zip packages');
     expect(execution.prompt).toContain('Do not delete job output files as cleanup');
     await expect(fs.readFile(path.join(outputDir, 'agent-prompt.md'), 'utf8')).resolves.toContain('fetch-archive-changes');
   });

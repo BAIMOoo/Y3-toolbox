@@ -268,6 +268,162 @@ describe('AgentJobStore', () => {
     await expect(fs.readFile(path.join(root, 'jobs', done.id, 'fetch_summary.csv'), 'utf8')).resolves.toContain('mock,1');
   });
 
+  it('keeps failed archive jobs failed while exposing an existing safe zip artifact', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-failed-archive-existing-zip-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "function zipBuffer(entryName, body){const n=Buffer.from(entryName); const b=Buffer.from(body); const local=Buffer.alloc(30); local.writeUInt32LE(0x04034b50,0); local.writeUInt16LE(0,8); local.writeUInt32LE(b.length,18); local.writeUInt32LE(b.length,22); local.writeUInt16LE(n.length,26); const central=Buffer.alloc(46); central.writeUInt32LE(0x02014b50,0); central.writeUInt16LE(20,4); central.writeUInt16LE(20,6); central.writeUInt16LE(0,10); central.writeUInt32LE(b.length,20); central.writeUInt32LE(b.length,24); central.writeUInt16LE(n.length,28); const off=local.length+n.length+b.length; const eocd=Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50,0); eocd.writeUInt16LE(1,8); eocd.writeUInt16LE(1,10); eocd.writeUInt32LE(central.length+n.length,12); eocd.writeUInt32LE(off,16); return Buffer.concat([local,n,b,central,n,eocd]);}",
+      "const zip=path.join(out,'archive-change.zip');",
+      "fs.writeFileSync(zip, zipBuffer('fetch_summary.csv','partial zip evidence'));",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'failed',summary:'late archive failure',artifacts:[{path:zip}],verification:['partial zip exists'],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230', mapId: '204521', from: '2026.06.09-00:00:00', to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.31');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('failed');
+    expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['archive-change.zip']);
+    const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
+    expect(artifact?.path).toContain(`${path.sep}.public-artifacts${path.sep}`);
+    expect(firstZipEntryText(await fs.readFile(artifact!.path))).toBe('partial zip evidence');
+  });
+
+  it('synthesizes one partial archive zip for failed archive jobs with safe CSV evidence but no zip', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-failed-archive-fallback-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "fs.writeFileSync(path.join(out,'fetch_summary.csv'),'player,matched_log_count\\nmock,1\\n');",
+      "fs.writeFileSync(path.join(out,'30144230_archive_changes.csv'),'key,before,after\\na,b,c\\n');",
+      "fs.writeFileSync(path.join(out,'aid_nickname_mapping.csv'),'aid,nickname\\n1,mock\\n');",
+      "fs.writeFileSync(path.join(out,'stdout.txt'),'must not publish');",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'failed',summary:'failed after writing csvs',artifacts:[{path:path.join(out,'fetch_summary.csv')}],verification:[],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230', mapId: '204521', from: '2026.06.09-00:00:00', to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.32');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('failed');
+    expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['partial-archive-changes.zip']);
+    const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
+    expect(artifact?.path).toContain(`${path.sep}.public-artifacts${path.sep}`);
+    const names = zipHeaderFlags(await fs.readFile(artifact!.path)).filter((header) => header.kind === 'central').map((header) => header.name).sort();
+    expect(names).toEqual(['30144230_archive_changes.csv', 'aid_nickname_mapping.csv', 'fetch_summary.csv']);
+    expect(names).not.toContain('stdout.txt');
+  });
+
+  it('exposes no failed archive artifact when no safe partial evidence files exist', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-failed-archive-no-safe-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "fs.writeFileSync(path.join(out,'debug-command.txt'),'AGENT_TOKEN=value');",
+      "fs.writeFileSync(path.join(out,'raw.log'),'log');",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'failed',summary:'no safe evidence',artifacts:[],verification:[],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230', mapId: '204521', from: '2026.06.09-00:00:00', to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.33');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('failed');
+    expect(done.artifacts).toEqual([]);
+    expect(done.summary).toContain('no safe evidence');
+  });
+
+  it('restores failed archive jobs by rebuilding a partial zip from safe CSV evidence', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-failed-archive-restore-'));
+    const jobsRoot = path.join(root, 'jobs');
+    const outputDir = path.join(jobsRoot, 'job-failed-archive');
+    await fs.mkdir(outputDir, { recursive: true });
+    await fs.writeFile(path.join(outputDir, 'fetch_summary.csv'), 'player,matched_log_count\nmock,1\n');
+    await fs.writeFile(path.join(outputDir, 'nested_archive_changes.csv'), 'ignored when nested? no, root file safe\n');
+    await fs.writeFile(path.join(outputDir, 'job-state.json'), JSON.stringify({
+      version: 1,
+      job: {
+        id: 'job-failed-archive',
+        skillId: 'fetch-archive-changes',
+        skillLabel: '查询存档变化',
+        status: 'failed',
+        summary: 'failed before artifact publish',
+        createdAt: '2026-06-10T00:00:00.000Z',
+        updatedAt: '2026-06-10T00:00:01.000Z',
+        finishedAt: '2026-06-10T00:00:01.000Z',
+        artifacts: [],
+        outputDir,
+        params: { players: '30144230', mapId: '204521', from: '2026.06.09-00:00:00', to: '2026.06.10-00:00:00' },
+        ownerToken: OWNER_TOKEN,
+        safeResume: false,
+        progressOffset: 0,
+      },
+    }, null, 2));
+
+    const store = new AgentJobStore(config(root, { jobsRoot }));
+    await store.ready();
+    const job = store.getJob('job-failed-archive', OWNER_TOKEN);
+
+    expect(job?.status).toBe('failed');
+    expect(job?.artifacts.map((artifact) => artifact.name)).toEqual(['partial-archive-changes.zip']);
+    await expect(store.getArtifact('job-failed-archive', job!.artifacts[0].id, OWNER_TOKEN)).resolves.toMatchObject({ name: 'partial-archive-changes.zip' });
+  });
+
+  it('does not expose loose failed archive CSV files as public artifacts', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-failed-archive-no-loose-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "const csv=path.join(out,'fetch_summary.csv');",
+      "fs.writeFileSync(csv,'player,matched_log_count\\nmock,1\\n');",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'failed',summary:'csv only',artifacts:[{path:csv}],verification:[],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230', mapId: '204521', from: '2026.06.09-00:00:00', to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.34');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('failed');
+    expect(done.artifacts).toHaveLength(1);
+    expect(done.artifacts[0].name).toBe('partial-archive-changes.zip');
+    await expect(store.getArtifact(done.id, 'fetch_summary.csv', OWNER_TOKEN)).resolves.toBeNull();
+  });
+
+  it('routes failed archive fallback zips through the public sanitizer after rejecting unsafe existing zips', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-failed-archive-sanitizer-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "fs.writeFileSync(path.join(out,'archive-change.zip'),'not a zip C:\\\\secret AGENT_TOKEN=value');",
+      "fs.writeFileSync(path.join(out,'fetch_summary.csv'),'player,matched_log_count\\nmock,1\\n');",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'failed',summary:'unsafe zip then fallback',artifacts:[{path:path.join(out,'archive-change.zip')}],verification:[],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230', mapId: '204521', from: '2026.06.09-00:00:00', to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.35');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('failed');
+    expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['partial-archive-changes.zip']);
+    const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
+    expect(artifact?.path).toBe(path.join(root, 'jobs', done.id, '.public-artifacts', 'partial-archive-changes.zip'));
+    const sanitized = await fs.readFile(artifact!.path);
+    expect(sanitized.toString('utf8')).not.toContain('C:\\secret');
+    expect(sanitized.toString('utf8')).not.toContain('AGENT_TOKEN=value');
+    expect(firstZipEntryText(sanitized)).toBe('player,matched_log_count\nmock,1\n');
+  });
+
   it('builds success summaries as complete sentences without punctuation collisions', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-summary-punctuation-'));
     const script = [
