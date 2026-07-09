@@ -793,6 +793,70 @@ describe('AgentJobStore', () => {
     await expect(fs.readFile(path.join(root, 'jobs', done.id, 'archive-change.zip'), 'utf8')).resolves.toContain('not a zip');
   });
 
+
+  it('repackages zip artifacts when local file header sizes hide unsafe trailing bytes', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-zip-local-size-mismatch-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "function crc32(buf){let c=~0; for(const b of buf){c^=b; for(let k=0;k<8;k++) c=(c>>>1)^(0xedb88320&-(c&1));} return ~c>>>0;}",
+      "function zipBuffer(entryName, safeBody, hiddenBody){const n=Buffer.from(entryName); const safe=Buffer.from(safeBody); const hidden=Buffer.from(hiddenBody); const localBody=Buffer.concat([safe,hidden]); const local=Buffer.alloc(30); local.writeUInt32LE(0x04034b50,0); local.writeUInt16LE(0,8); local.writeUInt32LE(crc32(localBody),14); local.writeUInt32LE(localBody.length,18); local.writeUInt32LE(localBody.length,22); local.writeUInt16LE(n.length,26); const central=Buffer.alloc(46); central.writeUInt32LE(0x02014b50,0); central.writeUInt16LE(20,4); central.writeUInt16LE(20,6); central.writeUInt16LE(0,10); central.writeUInt32LE(crc32(safe),16); central.writeUInt32LE(safe.length,20); central.writeUInt32LE(safe.length,24); central.writeUInt16LE(n.length,28); central.writeUInt32LE(0,42); const off=local.length+n.length+localBody.length; const eocd=Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50,0); eocd.writeUInt16LE(1,8); eocd.writeUInt16LE(1,10); eocd.writeUInt32LE(central.length+n.length,12); eocd.writeUInt32LE(off,16); return Buffer.concat([local,n,localBody,central,n,eocd]);}",
+      "const zip=path.join(out,'archive-change.zip');",
+      "fs.writeFileSync(zip, zipBuffer('summary.csv','safe,content'+String.fromCharCode(10),'AGENT_TOKEN=secret'));",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'local size mismatch done',artifacts:[{path:zip}],verification:['zip checked'],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230',
+      mapId: '204521',
+      from: '2026.06.09-00:00:00',
+      to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.23');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('succeeded');
+    expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['archive-change.zip']);
+    const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
+    const originalZip = await fs.readFile(path.join(root, 'jobs', done.id, 'archive-change.zip'));
+    const sanitizedZip = await fs.readFile(artifact!.path);
+    expect(sanitizedZip).not.toEqual(originalZip);
+    expect(sanitizedZip.includes(Buffer.from('AGENT_TOKEN=secret'))).toBe(false);
+    expect(firstZipEntryText(sanitizedZip)).toBe('safe,content\n');
+  });
+
+  it('repackages zip artifacts when local file headers disagree with safe central names', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-zip-local-header-mismatch-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "function zipBuffer(localName, centralName, body){const localN=Buffer.from(localName); const centralN=Buffer.from(centralName); const b=Buffer.from(body); const local=Buffer.alloc(30); local.writeUInt32LE(0x04034b50,0); local.writeUInt16LE(0,8); local.writeUInt32LE(b.length,18); local.writeUInt32LE(b.length,22); local.writeUInt16LE(localN.length,26); const central=Buffer.alloc(46); central.writeUInt32LE(0x02014b50,0); central.writeUInt16LE(20,4); central.writeUInt16LE(20,6); central.writeUInt16LE(0,10); central.writeUInt32LE(b.length,20); central.writeUInt32LE(b.length,24); central.writeUInt16LE(centralN.length,28); central.writeUInt32LE(0,42); const off=local.length+localN.length+b.length; const eocd=Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50,0); eocd.writeUInt16LE(1,8); eocd.writeUInt16LE(1,10); eocd.writeUInt32LE(central.length+centralN.length,12); eocd.writeUInt32LE(off,16); return Buffer.concat([local,localN,b,central,centralN,eocd]);}",
+      "const zip=path.join(out,'archive-change.zip');",
+      "fs.writeFileSync(zip, zipBuffer('../secret.txt','summary.csv','safe,content'+String.fromCharCode(10)));",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'local header mismatch done',artifacts:[{path:zip}],verification:['zip checked'],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230',
+      mapId: '204521',
+      from: '2026.06.09-00:00:00',
+      to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.22');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('succeeded');
+    expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['archive-change.zip']);
+    const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
+    const originalZip = await fs.readFile(path.join(root, 'jobs', done.id, 'archive-change.zip'));
+    const sanitizedZip = await fs.readFile(artifact!.path);
+    expect(sanitizedZip).not.toEqual(originalZip);
+    expect(sanitizedZip.includes(Buffer.from('../secret.txt'))).toBe(false);
+    const headers = zipHeaderFlags(sanitizedZip);
+    expect(headers.map((header) => `${header.kind}:${header.name}`).sort()).toEqual(['central:summary.csv', 'local:summary.csv']);
+    expect(firstZipEntryText(sanitizedZip)).toBe('safe,content\n');
+  });
+
 });
 
 describe('public backend guardrails', () => {
@@ -890,6 +954,94 @@ describe('public backend guardrails', () => {
     if (!done || done.status !== 'succeeded') throw new Error(`job did not finish sanitizing public zip: ${done?.status ?? 'missing'}`);
     expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['archive-change.zip']);
   }, 20_000);
+
+
+  it('copies unchanged public-safe zip artifacts byte-identically', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-zip-copy-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "function zipBuffer(entryName, body){const n=Buffer.from(entryName); const b=Buffer.from(body); const local=Buffer.alloc(30); local.writeUInt32LE(0x04034b50,0); local.writeUInt16LE(0,8); local.writeUInt32LE(b.length,18); local.writeUInt32LE(b.length,22); local.writeUInt16LE(n.length,26); const central=Buffer.alloc(46); central.writeUInt32LE(0x02014b50,0); central.writeUInt16LE(20,4); central.writeUInt16LE(20,6); central.writeUInt16LE(0,10); central.writeUInt32LE(b.length,20); central.writeUInt32LE(b.length,24); central.writeUInt16LE(n.length,28); const off=local.length+n.length+b.length; const eocd=Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50,0); eocd.writeUInt16LE(1,8); eocd.writeUInt16LE(1,10); eocd.writeUInt32LE(central.length+n.length,12); eocd.writeUInt32LE(off,16); return Buffer.concat([local,n,b,central,n,eocd]);}",
+      "const zip=path.join(out,'archive-change.zip');",
+      "fs.writeFileSync(zip, zipBuffer('summary.csv',['player,matched_log_count','mock,1',''].join(String.fromCharCode(10))));",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'safe zip done',artifacts:[{path:zip}],verification:['zip checked'],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230',
+      mapId: '204521',
+      from: '2026.06.09-00:00:00',
+      to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.22');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('succeeded');
+    expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['archive-change.zip']);
+    const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
+    expect(artifact?.path).toBe(path.join(root, 'jobs', done.id, '.public-artifacts', 'archive-change.zip'));
+    await expect(fs.readFile(artifact!.path)).resolves.toEqual(await fs.readFile(path.join(root, 'jobs', done.id, 'archive-change.zip')));
+  });
+
+  it('repackages zip artifacts when bytes are inserted between the central directory and EOCD', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-zip-central-padding-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "function zipBuffer(entryName, body, padding){const n=Buffer.from(entryName); const b=Buffer.from(body); const p=Buffer.from(padding); const local=Buffer.alloc(30); local.writeUInt32LE(0x04034b50,0); local.writeUInt16LE(0,8); local.writeUInt32LE(b.length,18); local.writeUInt32LE(b.length,22); local.writeUInt16LE(n.length,26); const central=Buffer.alloc(46); central.writeUInt32LE(0x02014b50,0); central.writeUInt16LE(20,4); central.writeUInt16LE(20,6); central.writeUInt16LE(0,10); central.writeUInt32LE(b.length,20); central.writeUInt32LE(b.length,24); central.writeUInt16LE(n.length,28); const off=local.length+n.length+b.length; const eocd=Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50,0); eocd.writeUInt16LE(1,8); eocd.writeUInt16LE(1,10); eocd.writeUInt32LE(central.length+n.length,12); eocd.writeUInt32LE(off,16); return Buffer.concat([local,n,b,central,n,p,eocd]);}",
+      "const zip=path.join(out,'archive-change.zip');",
+      "fs.writeFileSync(zip, zipBuffer('summary.csv',['player,matched_log_count','mock,1',''].join(String.fromCharCode(10)),'AGENT_TOKEN=centralpad'));",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'central padding done',artifacts:[{path:zip}],verification:['zip checked'],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230',
+      mapId: '204521',
+      from: '2026.06.09-00:00:00',
+      to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.24');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('succeeded');
+    expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['archive-change.zip']);
+    const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
+    const originalZip = await fs.readFile(path.join(root, 'jobs', done.id, 'archive-change.zip'));
+    const sanitizedZip = await fs.readFile(artifact!.path);
+    expect(sanitizedZip).not.toEqual(originalZip);
+    expect(sanitizedZip.includes(Buffer.from('AGENT_TOKEN=centralpad'))).toBe(false);
+    expect(firstZipEntryText(sanitizedZip)).toBe('player,matched_log_count\nmock,1\n');
+  });
+
+  it('repackages zip artifacts when declared central directory size hides unsafe trailing bytes', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-zip-central-declared-padding-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "function zipBuffer(entryName, body, padding){const n=Buffer.from(entryName); const b=Buffer.from(body); const p=Buffer.from(padding); const local=Buffer.alloc(30); local.writeUInt32LE(0x04034b50,0); local.writeUInt16LE(0,8); local.writeUInt32LE(b.length,18); local.writeUInt32LE(b.length,22); local.writeUInt16LE(n.length,26); const central=Buffer.alloc(46); central.writeUInt32LE(0x02014b50,0); central.writeUInt16LE(20,4); central.writeUInt16LE(20,6); central.writeUInt16LE(0,10); central.writeUInt32LE(b.length,20); central.writeUInt32LE(b.length,24); central.writeUInt16LE(n.length,28); const off=local.length+n.length+b.length; const eocd=Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50,0); eocd.writeUInt16LE(1,8); eocd.writeUInt16LE(1,10); eocd.writeUInt32LE(central.length+n.length+p.length,12); eocd.writeUInt32LE(off,16); return Buffer.concat([local,n,b,central,n,p,eocd]);}",
+      "const zip=path.join(out,'archive-change.zip');",
+      "fs.writeFileSync(zip, zipBuffer('summary.csv',['player,matched_log_count','mock,1',''].join(String.fromCharCode(10)),'AGENT_TOKEN=centralinside'));",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'declared central padding done',artifacts:[{path:zip}],verification:['zip checked'],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230',
+      mapId: '204521',
+      from: '2026.06.09-00:00:00',
+      to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN, 'trusted:203.0.113.25');
+    const done = await waitForTerminal(store, submitted.id);
+
+    expect(done.status).toBe('succeeded');
+    expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['archive-change.zip']);
+    const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
+    const originalZip = await fs.readFile(path.join(root, 'jobs', done.id, 'archive-change.zip'));
+    const sanitizedZip = await fs.readFile(artifact!.path);
+    expect(sanitizedZip).not.toEqual(originalZip);
+    expect(sanitizedZip.includes(Buffer.from('AGENT_TOKEN=centralinside'))).toBe(false);
+    expect(firstZipEntryText(sanitizedZip)).toBe('player,matched_log_count\nmock,1\n');
+  });
 
   it('repackages public zip artifacts with only redacted user result files', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-zip-redact-'));

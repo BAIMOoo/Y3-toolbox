@@ -1,6 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
-import { inflateRawSync } from 'node:zlib';
 import type { Readable } from 'node:stream';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -18,13 +17,11 @@ const EVENT_LOG_VERSION = 1;
 const JOB_STATE_VERSION = 1;
 const MAX_EVENT_RESPONSE = 500;
 const MAX_PUBLIC_ZIP_ARTIFACT_BYTES = 100 * 1024 * 1024;
-const MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES = 100 * 1024 * 1024;
 const PUBLIC_ARTIFACT_DIR = '.public-artifacts';
 const WINDOWS_PATH_PATTERN = /[A-Za-z]:(?:\\\\|\\)[^\s;,)"]+/g;
 const UNC_PATH_PATTERN = /\\\\[^\s;,)"]+/g;
 const POSIX_MOUNT_PATH_PATTERN = /\/mnt\/[a-z]\/[^\s;,)"]+/g;
 const SENSITIVE_ENV_ASSIGNMENT_PATTERN = /\b[A-Z0-9_]*(?:AGENT|Y3|VITE|TOKEN|SECRET|PASSWORD|API_KEY)[A-Z0-9_]*=[^\s;,)"]+/gi;
-const DANGEROUS_EXECUTABLE_TEXT_PATTERN = /(?:\.exe|\.bat|\.cmd|\.ps1|\.sh|\.py)(?:\s|$)/i;
 const RECOVERY_EVENT_SUMMARY = 'Agent runner restarted; real jobs are not resumed automatically';
 const RUNTIME_GATED_SKILLS = new Set(['fetch-mismatch-logs', 'export-kkres-image']);
 const DEFAULT_MAX_RUNNING_JOBS = 5;
@@ -618,29 +615,42 @@ async function preparePublicArtifact(skillId: StoredJob['skillId'], filePath: st
   const extension = path.extname(filePath).toLowerCase();
   if (skillId === 'export-kkres-image') return extension === '.kkres' ? { path: filePath, trustedContent: false } : null;
   if (extension !== '.zip') return await hasSafePublicArtifactContent(skillId, filePath) ? { path: filePath, trustedContent: false } : null;
-  const safeZip = await sanitizedPublicZipArtifact(filePath, outputDir);
-  return safeZip ? { path: safeZip, trustedContent: true } : null;
+  try {
+    const safeZip = await sanitizedPublicZipArtifact(filePath, outputDir);
+    return safeZip ? { path: safeZip, trustedContent: true } : null;
+  } catch (err) {
+    console.error('public zip artifact sanitizer failed:', err instanceof Error ? err.message : String(err));
+    return null;
+  }
 }
 
 async function sanitizedPublicZipArtifact(filePath: string, outputDir: string): Promise<string | null> {
   const stat = await fs.stat(filePath);
   if (stat.size > MAX_PUBLIC_ZIP_ARTIFACT_BYTES) return null;
-  const sanitized = await sanitizeZipArtifactOffThread(await fs.readFile(filePath));
-  if (!sanitized) return null;
 
   const publicDir = path.join(outputDir, PUBLIC_ARTIFACT_DIR);
   await fs.mkdir(publicDir, { recursive: true });
   const publicName = path.basename(filePath);
   const publicPath = path.join(publicDir, publicName);
-  await fs.writeFile(publicPath, sanitized);
-  return publicPath;
+  const tempPath = path.join(publicDir, `${publicName}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
+
+  try {
+    const wrote = await sanitizeZipArtifactOffThread(filePath, tempPath);
+    if (!wrote) return null;
+    const tempStat = await fs.stat(tempPath);
+    if (!tempStat.isFile() || tempStat.size > MAX_PUBLIC_ZIP_ARTIFACT_BYTES) return null;
+    await replaceFile(tempPath, publicPath);
+    return publicPath;
+  } finally {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
+  }
 }
 
 
-async function sanitizeZipArtifactOffThread(buffer: Buffer): Promise<Buffer | null> {
+async function sanitizeZipArtifactOffThread(inputPath: string, tempPath: string): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'zipSanitizerWorker.cjs');
-    const worker = new Worker(workerPath, { workerData: buffer });
+    const worker = new Worker(workerPath, { workerData: { inputPath, tempPath } });
     let settled = false;
     const finish = (fn: () => void) => {
       if (settled) return;
@@ -652,10 +662,10 @@ async function sanitizeZipArtifactOffThread(buffer: Buffer): Promise<Buffer | nu
       void worker.terminate();
       finish(() => reject(new Error('Timed out while sanitizing public zip artifact')));
     }, 120_000);
-    worker.once('message', (message: { ok: true; buffer: Uint8Array | null } | { ok: false; error: string }) => {
+    worker.once('message', (message: { ok: true; wrote: boolean } | { ok: false; error: string }) => {
       finish(() => {
         if (!message.ok) reject(new Error(message.error));
-        else resolve(message.buffer ? Buffer.from(message.buffer) : null);
+        else resolve(message.wrote === true);
       });
     });
     worker.once('error', (err) => finish(() => reject(err)));
@@ -681,69 +691,10 @@ async function hasSafePublicArtifactContent(skillId: StoredJob['skillId'], fileP
 }
 
 async function zipEntryScan(filePath: string): Promise<{ valid: boolean; entryNames: string[] }> {
-  const buffer = await fs.readFile(filePath);
-  return zipEntryScanFromBuffer(buffer);
-}
-
-function zipEntryScanFromBuffer(buffer: Buffer): { valid: boolean; entryNames: string[] } {
-  const directory = zipCentralDirectoryInfo(buffer);
-  if (!directory) return { valid: false, entryNames: [] };
-  const names: string[] = [];
-  let offset = 0;
-  while (offset < directory.centralOffset) {
-    if (offset + 30 > buffer.length || buffer.readUInt32LE(offset) !== 0x04034b50) return { valid: false, entryNames: names };
-    const compressionMethod = buffer.readUInt16LE(offset + 8);
-    const compressedSize = buffer.readUInt32LE(offset + 18);
-    const uncompressedSize = buffer.readUInt32LE(offset + 22);
-    const nameLength = buffer.readUInt16LE(offset + 26);
-    const extraLength = buffer.readUInt16LE(offset + 28);
-    const nameStart = offset + 30;
-    const nameEnd = nameStart + nameLength;
-    const contentStart = nameEnd + extraLength;
-    const contentEnd = contentStart + compressedSize;
-    if (nameLength <= 0 || nameEnd > buffer.length || contentEnd > buffer.length || contentEnd > directory.centralOffset) return { valid: false, entryNames: names };
-    names.push(buffer.subarray(nameStart, nameEnd).toString('utf8'));
-    const text = zipEntryText(buffer.subarray(contentStart, contentEnd), compressionMethod, uncompressedSize);
-    if (text === UNSAFE_ZIP_ENTRY_CONTENT || (text && hasUnsafePublicText(text))) names.push('../unsafe-content.txt');
-    offset = contentEnd;
-  }
-  if (offset !== directory.centralOffset) return { valid: false, entryNames: names };
-  for (let central = directory.centralOffset; central < directory.eocdOffset;) {
-    if (central + 46 > buffer.length || buffer.readUInt32LE(central) !== 0x02014b50) return { valid: false, entryNames: names };
-    const nameLength = buffer.readUInt16LE(central + 28);
-    const extraLength = buffer.readUInt16LE(central + 30);
-    const commentLength = buffer.readUInt16LE(central + 32);
-    const nameStart = central + 46;
-    const nameEnd = nameStart + nameLength;
-    if (nameLength <= 0 || nameEnd > buffer.length) return { valid: false, entryNames: names };
-    names.push(buffer.subarray(nameStart, nameEnd).toString('utf8'));
-    central = nameEnd + extraLength + commentLength;
-  }
-  return { valid: names.length > 0, entryNames: names };
-}
-
-function zipCentralDirectoryInfo(buffer: Buffer): { centralOffset: number; eocdOffset: number } | null {
-  for (let offset = Math.max(0, buffer.length - 65_557); offset + 22 <= buffer.length; offset += 1) {
-    if (buffer.readUInt32LE(offset) !== 0x06054b50) continue;
-    const centralOffset = buffer.readUInt32LE(offset + 16);
-    return centralOffset <= offset ? { centralOffset, eocdOffset: offset } : null;
-  }
-  return null;
-}
-
-
-const UNSAFE_ZIP_ENTRY_CONTENT = '__unsafe_zip_entry_content__';
-
-function zipEntryText(compressed: Buffer, method: number, uncompressedSize: number): string | null {
-  try {
-    if (uncompressedSize > MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES) return UNSAFE_ZIP_ENTRY_CONTENT;
-    if (method === 0) return compressed.toString('utf8');
-    if (method === 8) return inflateRawSync(compressed, { maxOutputLength: MAX_PUBLIC_ZIP_ENTRY_SCAN_BYTES }).toString('utf8');
-    return UNSAFE_ZIP_ENTRY_CONTENT;
-  } catch (err) {
-    console.error('zipEntryText decompression failed:', err instanceof Error ? err.message : String(err));
-    return UNSAFE_ZIP_ENTRY_CONTENT;
-  }
+  const prepared = await sanitizedPublicZipArtifact(filePath, path.dirname(filePath));
+  if (!prepared) return { valid: false, entryNames: [] };
+  await fs.rm(prepared, { force: true }).catch(() => undefined);
+  return { valid: true, entryNames: [path.basename(filePath)] };
 }
 
 function hasUnsafeArchiveEntryName(name: string): boolean {
@@ -755,21 +706,6 @@ function hasUnsafeArchiveEntryName(name: string): boolean {
     || normalized.startsWith('//')
     || /(?:^|[/])(?:stdout|stderr|debug|diagnostic|env|command)(?:[/._-]|$)/i.test(normalized)
     || /(?:\.exe|\.bat|\.cmd|\.ps1|\.sh|\.py|\.js)$/i.test(normalized);
-}
-
-function hasSensitivePublicText(value: string): boolean {
-  if (!/[=]/.test(value) || !/(?:AGENT|Y3|VITE|TOKEN|SECRET|PASSWORD|API_KEY)/i.test(value)) return false;
-  SENSITIVE_ENV_ASSIGNMENT_PATTERN.lastIndex = 0;
-  return SENSITIVE_ENV_ASSIGNMENT_PATTERN.test(value);
-}
-
-function hasUnsafePublicText(value: string): boolean {
-  return WINDOWS_PATH_PATTERN.test(value)
-    || UNC_PATH_PATTERN.test(value)
-    || POSIX_MOUNT_PATH_PATTERN.test(value)
-    || /(?:^|[/])\.\.(?:[/]|$)/.test(value)
-    || hasSensitivePublicText(value)
-    || DANGEROUS_EXECUTABLE_TEXT_PATTERN.test(value);
 }
 
 function createJobId(): string {
