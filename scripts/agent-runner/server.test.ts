@@ -14,7 +14,7 @@ afterEach(async () => {
 
 const OWNER_A = 'owner-token-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const OWNER_B = 'owner-token-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-const TEST_CLIENT_VERSION = '0.1.7';
+const TEST_CLIENT_VERSION = '0.1.8';
 
 function ownerHeaders(ownerToken = OWNER_A) {
   return { 'Content-Type': 'application/json', 'X-Owner-Token': ownerToken };

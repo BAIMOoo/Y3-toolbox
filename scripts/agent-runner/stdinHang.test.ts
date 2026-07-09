@@ -8,7 +8,7 @@ import type { AgentJobSummary } from '../../src/agentJobs/types';
 
 const servers: http.Server[] = [];
 const OWNER_TOKEN = 'owner-token-stdin-0001';
-const TEST_CLIENT_VERSION = '0.1.7';
+const TEST_CLIENT_VERSION = '0.1.8';
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));

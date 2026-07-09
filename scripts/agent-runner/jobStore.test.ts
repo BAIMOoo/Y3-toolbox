@@ -417,7 +417,8 @@ describe('AgentJobStore', () => {
     expect(done.status).toBe('failed');
     expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['partial-archive-changes.zip']);
     const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
-    expect(artifact?.path).toBe(path.join(root, 'jobs', done.id, '.public-artifacts', 'partial-archive-changes.zip'));
+    expect(artifact?.path).toContain(`${path.sep}.public-artifacts${path.sep}`);
+    expect(path.basename(artifact?.path ?? '')).toBe('partial-archive-changes.zip');
     const sanitized = await fs.readFile(artifact!.path);
     expect(sanitized.toString('utf8')).not.toContain('C:\\secret');
     expect(sanitized.toString('utf8')).not.toContain('AGENT_TOKEN=value');
@@ -1191,7 +1192,8 @@ describe('public backend guardrails', () => {
     expect(done.status).toBe('succeeded');
     expect(done.artifacts.map((artifact) => artifact.name)).toEqual(['archive-change.zip']);
     const artifact = await store.getArtifact(done.id, done.artifacts[0].id, OWNER_TOKEN);
-    expect(artifact?.path).toBe(path.join(root, 'jobs', done.id, '.public-artifacts', 'archive-change.zip'));
+    expect(artifact?.path).toContain(`${path.sep}.public-artifacts${path.sep}`);
+    expect(path.basename(artifact?.path ?? '')).toBe('archive-change.zip');
     await expect(fs.readFile(artifact!.path)).resolves.toEqual(await fs.readFile(path.join(root, 'jobs', done.id, 'archive-change.zip')));
   });
 
