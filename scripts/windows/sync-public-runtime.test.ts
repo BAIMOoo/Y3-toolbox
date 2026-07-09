@@ -4,6 +4,22 @@ import path from 'node:path';
 
 const script = fs.readFileSync(path.join(process.cwd(), 'scripts/windows/sync-public-runtime.ps1'), 'utf8');
 
+function parseExcludedRelativeRoots(scriptSource: string): string[] {
+  const match = scriptSource.match(/\$ExcludedRelativeRoots\s*=\s*@\((?<body>[\s\S]*?)\n\)/);
+  if (!match?.groups?.body) {
+    throw new Error('Could not parse $ExcludedRelativeRoots from sync-public-runtime.ps1');
+  }
+  return [...match.groups.body.matchAll(/'([^']+)'/g)].map((entry) => entry[1]);
+}
+
+function isExcludedRelativePath(relativePath: string, excludedRelativeRoots: string[]): boolean {
+  const normalized = relativePath.replace(/\//g, '\\').toLocaleLowerCase('en-US');
+  return excludedRelativeRoots.some((excluded) => {
+    const normalizedExcluded = excluded.toLocaleLowerCase('en-US');
+    return normalized === normalizedExcluded || normalized.startsWith(`${normalizedExcluded}\\`);
+  });
+}
+
 describe('Windows public runtime sync script contract', () => {
   it('defaults to dry-run and records status JSON before mutation', () => {
     expect(script).toContain('[switch]$Apply');
@@ -45,6 +61,17 @@ describe('Windows public runtime sync script contract', () => {
       expect(script).toContain(fragment);
     }
     expect(script).not.toMatch(/mail[\\/]+secrets/i);
+  });
+
+  it('keeps public archive helper deliverables in the copy plan while excluding OMX state', () => {
+    const excludedRelativeRoots = parseExcludedRelativeRoots(script);
+
+    // .codex skill helper deliverables are shipped by the public runtime sync copy plan,
+    // not by ordinary git diff, so they must not be filtered as runtime-only state.
+    expect(isExcludedRelativePath('.codex\\skills\\fetch-archive-changes\\scripts\\fetch_archive_changes.py', excludedRelativeRoots)).toBe(false);
+    expect(isExcludedRelativePath('.codex\\skills\\fetch-archive-changes\\SKILL.md', excludedRelativeRoots)).toBe(false);
+    expect(isExcludedRelativePath('.omx\\state', excludedRelativeRoots)).toBe(true);
+    expect(isExcludedRelativePath('.omx\\state\\sync-public-runtime-status.json', excludedRelativeRoots)).toBe(true);
   });
 
   it('requires and forwards release manifest metadata for apply and public restart', () => {

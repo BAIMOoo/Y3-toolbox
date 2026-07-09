@@ -424,7 +424,8 @@ export class AgentJobStore {
       const content = buffer.toString('utf8');
       for (const line of content.split(/\r?\n/)) {
         if (!line.trim()) continue;
-        const progress = parseProgressLine(line);
+        const progress = parseProgressLine(line, job.skillId);
+        if (!progress) continue;
         await this.recordEvent(job, 'progress', progress, { updateState: false });
       }
       await this.writeJobState(job);
@@ -832,32 +833,35 @@ async function recoverFailedArchiveArtifacts(job: StoredJob): Promise<InternalAr
 }
 
 async function buildFailedArchiveArtifacts(job: StoredJob, preferredArtifactPaths: string[] = []): Promise<InternalArtifact[]> {
-  let artifacts = await buildZipArtifacts(job, preferredArtifactPaths);
+  const seenZipPaths = new Set<string>();
+  let artifacts = await buildZipArtifacts(job, preferredArtifactPaths, seenZipPaths);
   if (artifacts.length > 0) return artifacts;
 
   const manifest = await readManifest(job.outputDir).catch(() => null);
   const contract = AGENT_SKILL_CONTRACTS[job.skillId];
   if (manifest) {
     const manifestPaths = await manifestArtifactPaths(job.outputDir, manifest, contract.discoverArtifacts, contract.downloadableExtensions).catch(() => []);
-    artifacts = await buildZipArtifacts(job, manifestPaths);
+    artifacts = await buildZipArtifacts(job, manifestPaths, seenZipPaths);
     if (artifacts.length > 0) return artifacts;
   }
 
   const discoveredPaths = await contract.discoverArtifacts(job.outputDir).catch(() => []);
-  artifacts = await buildZipArtifacts(job, discoveredPaths);
+  artifacts = await buildZipArtifacts(job, discoveredPaths, seenZipPaths);
   if (artifacts.length > 0) return artifacts;
 
   const partialZip = await synthesizePartialArchiveChangesZip(job.outputDir);
   return partialZip ? buildArtifacts(job, [partialZip]) : [];
 }
 
-async function buildZipArtifacts(job: StoredJob, files: string[]): Promise<InternalArtifact[]> {
-  const zipFiles = files.filter(isZipPath);
+async function buildZipArtifacts(job: StoredJob, files: string[], seenZipPaths: Set<string>): Promise<InternalArtifact[]> {
+  const zipFiles = files.filter((file) => {
+    if (path.extname(file).toLowerCase() !== '.zip') return false;
+    const normalized = path.resolve(file);
+    if (seenZipPaths.has(normalized)) return false;
+    seenZipPaths.add(normalized);
+    return true;
+  });
   return zipFiles.length > 0 ? buildArtifacts(job, zipFiles) : [];
-}
-
-function isZipPath(file: string): boolean {
-  return path.extname(file).toLowerCase() === '.zip';
 }
 
 async function synthesizePartialArchiveChangesZip(outputDir: string): Promise<string | null> {
@@ -1070,7 +1074,8 @@ async function readJobState(outputDir: string): Promise<PersistedJobState | null
 }
 
 
-function parseProgressLine(line: string): Omit<AgentJobEvent, 'id' | 'jobId' | 'type' | 'createdAt'> {
+function parseProgressLine(line: string, skillId: string): Omit<AgentJobEvent, 'id' | 'jobId' | 'type' | 'createdAt'> | null {
+  if (skillId === 'fetch-archive-changes') return parseArchiveProgressLine(line);
   try {
     const parsed = JSON.parse(line) as { message?: unknown; progress?: unknown };
     const message = typeof parsed.message === 'string' && parsed.message.trim() ? parsed.message : line.slice(0, 500);
@@ -1079,4 +1084,24 @@ function parseProgressLine(line: string): Omit<AgentJobEvent, 'id' | 'jobId' | '
   } catch {
     return { message: line.slice(0, 500), raw: line };
   }
+}
+
+const ARCHIVE_PROGRESS_FORBIDDEN_MESSAGE_PATTERN = /archive_diff|raw_log|stdout|stderr|raw\s+log\s+content/i;
+
+function parseArchiveProgressLine(line: string): Omit<AgentJobEvent, 'id' | 'jobId' | 'type' | 'createdAt'> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const keys = Object.keys(parsed);
+  if (keys.length !== 1 || keys[0] !== 'message') return null;
+  const message = (parsed as { message: unknown }).message;
+  if (typeof message !== 'string') return null;
+  const trimmed = message.trim();
+  if (!trimmed || ARCHIVE_PROGRESS_FORBIDDEN_MESSAGE_PATTERN.test(trimmed)) return null;
+  return { message: trimmed };
 }

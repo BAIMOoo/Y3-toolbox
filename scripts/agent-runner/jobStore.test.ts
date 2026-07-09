@@ -676,7 +676,7 @@ describe('AgentJobStore', () => {
       "function zipBuffer(entryName, body){const n=Buffer.from(entryName); const b=Buffer.from(body); const local=Buffer.alloc(30); local.writeUInt32LE(0x04034b50,0); local.writeUInt16LE(0,8); local.writeUInt32LE(b.length,18); local.writeUInt32LE(b.length,22); local.writeUInt16LE(n.length,26); const central=Buffer.alloc(46); central.writeUInt32LE(0x02014b50,0); central.writeUInt16LE(20,4); central.writeUInt16LE(20,6); central.writeUInt16LE(0,10); central.writeUInt32LE(b.length,20); central.writeUInt32LE(b.length,24); central.writeUInt16LE(n.length,28); const off=local.length+n.length+b.length; const eocd=Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50,0); eocd.writeUInt16LE(1,8); eocd.writeUInt16LE(1,10); eocd.writeUInt32LE(central.length+n.length,12); eocd.writeUInt32LE(off,16); return Buffer.concat([local,n,b,central,n,eocd]);}",
       "console.log('hello stdout');",
       "console.error('hello stderr');",
-      "fs.appendFileSync(path.join(out,'progress.jsonl'), JSON.stringify({message:'halfway',progress:0.5})+'\\n');",
+      "fs.appendFileSync(path.join(out,'progress.jsonl'), JSON.stringify({message:'halfway'})+'\\n');",
       "const json=path.join(out,'mismatch_summary.json');",
       "const zip=path.join(out,'mismatch_logs.zip');",
       "fs.writeFileSync(json, JSON.stringify({record_count:1}));",
@@ -703,10 +703,66 @@ describe('AgentJobStore', () => {
     expect(payload?.events.some((event) => event.type === 'agent-output' && event.message.includes('hello stderr'))).toBe(false);
     expect(payload?.events.some((event) => event.type === 'agent-output' && event.message.includes('Raw agent output hidden'))).toBe(true);
     const progressEvent = payload?.events.find((event) => event.type === 'progress');
-    expect(progressEvent).toMatchObject({ message: 'halfway', progress: 0.5 });
+    expect(progressEvent).toMatchObject({ message: 'halfway' });
+    expect(progressEvent).not.toHaveProperty('progress');
     expect(progressEvent).not.toHaveProperty('raw');
     expect(payload?.latestEventId).toBeGreaterThan(0);
     expect(script).toContain('progress.jsonl');
+  });
+
+
+  it('drops hostile archive progress entries and exposes only safe message-only events', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-archive-progress-'));
+    const script = [
+      "const fs=require('fs');",
+      "const path=require('path');",
+      "const out=process.argv[1];",
+      "function zipBuffer(entryName, body){const n=Buffer.from(entryName); const b=Buffer.from(body); const local=Buffer.alloc(30); local.writeUInt32LE(0x04034b50,0); local.writeUInt16LE(0,8); local.writeUInt32LE(b.length,18); local.writeUInt32LE(b.length,22); local.writeUInt16LE(n.length,26); const central=Buffer.alloc(46); central.writeUInt32LE(0x02014b50,0); central.writeUInt16LE(20,4); central.writeUInt16LE(20,6); central.writeUInt16LE(0,10); central.writeUInt32LE(b.length,20); central.writeUInt32LE(b.length,24); central.writeUInt16LE(n.length,28); const off=local.length+n.length+b.length; const eocd=Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50,0); eocd.writeUInt16LE(1,8); eocd.writeUInt16LE(1,10); eocd.writeUInt32LE(central.length+n.length,12); eocd.writeUInt32LE(off,16); return Buffer.concat([local,n,b,central,n,eocd]);}",
+      "const progress=path.join(out,'progress.jsonl');",
+      "const lines=[",
+      "  JSON.stringify({message:'safe archive stage'}),",
+      "  JSON.stringify({message:'halfway',progress:0.5}),",
+      "  JSON.stringify({message:'raw metadata',raw:{archive_diff:'|secret|'}}),",
+      "  'not json',",
+      "  JSON.stringify(['array message']),",
+      "  JSON.stringify({message:''}),",
+      "  JSON.stringify({message:'   '}),",
+      "  JSON.stringify({message:'contains archive_diff marker'}),",
+      "  JSON.stringify({message:'contains raw_log marker'}),",
+      "  JSON.stringify({message:'contains stdout marker'}),",
+      "  JSON.stringify({message:'contains stderr marker'}),",
+      "  JSON.stringify({message:'contains raw log content marker'}),",
+      "];",
+      "fs.writeFileSync(progress, lines.join('\\n')+'\\n');",
+      "const zip=path.join(out,'archive-change.zip');",
+      "fs.writeFileSync(zip, zipBuffer('fetch_summary.csv','mock zip'));",
+      "fs.writeFileSync(path.join(out,'result-manifest.json'), JSON.stringify({status:'succeeded',summary:'archive done',artifacts:[{path:zip}],verification:['ok'],warnings:[]}));",
+    ].join('');
+    const store = new AgentJobStore(config(root, { mockMode: false, agentArgsTemplate: ['-e', script, '{outputDir}'] }));
+    const submitted = await store.submit('fetch-archive-changes', {
+      players: '30144230',
+      mapId: '204521',
+      from: '2026.06.09-00:00:00',
+      to: '2026.06.10-00:00:00',
+    }, OWNER_TOKEN);
+    const done = await waitForTerminal(store, submitted.id);
+    expect(done.status).toBe('succeeded');
+
+    const payload = await store.getJobEvents(submitted.id, OWNER_TOKEN, 0);
+    const progressEvents = payload?.events.filter((event) => event.type === 'progress') ?? [];
+    expect(progressEvents).toEqual([expect.objectContaining({ message: 'safe archive stage' })]);
+    expect(progressEvents[0]).not.toHaveProperty('progress');
+    expect(progressEvents[0]).not.toHaveProperty('raw');
+
+    const persistedEvents = (await fs.readFile(path.join(root, 'jobs', submitted.id, 'events.jsonl'), 'utf8'))
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as { event: { type: string; message: string; progress?: number; raw?: unknown } })
+      .filter((line) => line.event.type === 'progress')
+      .map((line) => line.event);
+    expect(persistedEvents).toEqual([{ ...persistedEvents[0], message: 'safe archive stage' }]);
+    expect(persistedEvents[0]).not.toHaveProperty('progress');
+    expect(persistedEvents[0]).not.toHaveProperty('raw');
   });
 
   it('restores active persisted jobs as failed recovery events when safeResume is false by default', async () => {
