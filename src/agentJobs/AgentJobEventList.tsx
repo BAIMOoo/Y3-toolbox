@@ -2,6 +2,7 @@ import React, { type RefObject } from 'react';
 import { Tag } from 'antd';
 import type { AgentJobEvent, AgentJobEventType } from './types';
 import { filterUserVisibleJobEvents } from './eventVisibility';
+import { splitReadableMessage } from './readableMessage';
 
 interface AgentJobEventListProps {
   events: AgentJobEvent[];
@@ -31,7 +32,11 @@ export function AgentJobEventList({ events, emptyMessage, logEndRef }: AgentJobE
                 {event.stream && <Tag>{event.stream}</Tag>}
               </span>
             </span>
-            <span className="agent-job-event-message">{event.message}</span>
+            <span className="agent-job-event-message" aria-label={event.message}>
+              {splitReadableMessage(event.message).map((segment, index) => (
+                <span key={`${event.id}-${index}`} className="agent-job-readable-line">{segment}</span>
+              ))}
+            </span>
           </div>
         ))}
         <div ref={logEndRef} />
