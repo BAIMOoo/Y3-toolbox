@@ -162,6 +162,7 @@ describe('agent runner skill contracts', () => {
 
     expect(execution.prompt).toContain('Skill id: fetch-mismatch-logs');
     expect(execution.prompt).toContain('Y3 source root is server-owned configuration');
+    expect(execution.prompt).toContain('decoded digest JSON must not remain GBK/GB18030 encoded');
     expect(execution.prompt).not.toContain('"sourceRoot"');
     expect(execution.prompt).not.toContain('Y3 源码根目录');
   });

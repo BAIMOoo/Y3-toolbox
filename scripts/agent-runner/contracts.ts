@@ -455,6 +455,7 @@ function mismatchPrompt(params: Record<string, unknown>, outputDir: string, conf
       `- Y3 source root is server-owned configuration; do not ask the client/user to fill a sourceRoot/root directory field.`,
       `- Prefer decoded digest output and record decoded_digest/digest_source in the manifest summary when available.`,
       `- Keep JSON/CSV/TXT evidence in the job output directory, but the final user-downloadable artifact must be only the generated .zip package.`,
+      `- Normalize every JSON/TXT file included in the downloadable zip to UTF-8 text before packaging; decoded digest JSON must not remain GBK/GB18030 encoded.`,
       `- Ensure result-manifest.json lists the .zip as the downloadable artifact; do not list loose JSON/CSV/TXT files as downloadable artifacts for this skill.`,
     ],
   });
