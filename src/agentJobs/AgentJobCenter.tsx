@@ -9,6 +9,7 @@ import { AgentJobEventList } from './AgentJobEventList';
 import { filterUserVisibleJobEvents } from './eventVisibility';
 import { getAgentQueueStatus, getAgentRunnerStatus, hasActiveAgentJobs, isTerminalAgentJob, refreshActiveAgentJobs } from './agentJobCenterStatus';
 import { handleAgentArtifactDownloadClick } from './artifactDownload';
+import { getArtifactDownloadScopeKey, getVisibleArtifactDownloadProgress, isTerminalArtifactDownloadProgress, type AgentArtifactDownloadProgressByJob } from './artifactDownloadProgress';
 import { formatArtifactSize } from './formatArtifactSize';
 import { formatAgentJobListTime } from './formatAgentJobListTime';
 import { createKkresStageRequestId, subscribeToActiveStageProgress, type StageProgressState } from './stageProgress';
@@ -32,10 +33,11 @@ export function AgentJobCenter() {
   const [bootstrapLoading, setBootstrapLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [stageProgress, setStageProgress] = useState<StageProgressState | null>(null);
-  const [artifactDownloadProgress, setArtifactDownloadProgress] = useState<AgentArtifactDownloadProgress | null>(null);
+  const [artifactDownloadProgressByJob, setArtifactDownloadProgressByJob] = useState<AgentArtifactDownloadProgressByJob>({});
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const latestEventIdsRef = useRef<Record<string, number>>({});
   const activeStageRequestIdRef = useRef<string | null>(null);
+  const artifactDownloadJobByUrlRef = useRef<Record<string, string>>({});
 
   const selectedSkill = useMemo(() => skills.find((skill) => skill.id === selectedSkillId) ?? skills[0], [selectedSkillId, skills]);
   const effectiveFormValues = useMemo(() => (selectedSkill ? applyAgentParamDefaults(selectedSkill.id, formValues) : formValues), [selectedSkill, formValues]);
@@ -46,6 +48,10 @@ export function AgentJobCenter() {
   const visibleActiveJobEvents = useMemo(() => filterUserVisibleJobEvents(activeJobEvents), [activeJobEvents]);
   const activeJobEventMeta = activeJob ? jobEventMeta[activeJob.id] : undefined;
   const activeJobDownloadArtifacts = useMemo(() => (activeJob ? visibleDownloadArtifacts(activeJob) : []), [activeJob]);
+  const visibleArtifactDownloadProgress = useMemo(
+    () => getVisibleArtifactDownloadProgress(activeJobStableId, artifactDownloadProgressByJob),
+    [activeJobStableId, artifactDownloadProgressByJob],
+  );
   const showPartialArchiveArtifactWarning = activeJob?.skillId === 'fetch-archive-changes'
     && activeJob.status === 'failed'
     && activeJobDownloadArtifacts.length > 0;
@@ -156,11 +162,17 @@ export function AgentJobCenter() {
     setStageProgress,
   ), []);
   useEffect(() => window.electronAPI?.onAgentArtifactDownloadProgress?.((progress) => {
-    setArtifactDownloadProgress(progress);
+    const scopeKey = getArtifactDownloadScopeKey(progress.url, window.location.href);
+    const jobId = artifactDownloadJobByUrlRef.current[scopeKey];
+    if (!jobId) return;
+    setArtifactDownloadProgressByJob((current) => ({ ...current, [jobId]: progress }));
+    if (isTerminalArtifactDownloadProgress(progress)) delete artifactDownloadJobByUrlRef.current[scopeKey];
   }) ?? (() => undefined), []);
 
-  const handleArtifactDownload = async (event: MouseEvent<HTMLElement>, artifactUrl: string, artifactName?: string) => {
-    setArtifactDownloadProgress({
+  const handleArtifactDownload = async (event: MouseEvent<HTMLElement>, jobId: string, artifactUrl: string, artifactName?: string) => {
+    const scopeKey = getArtifactDownloadScopeKey(artifactUrl, window.location.href);
+    artifactDownloadJobByUrlRef.current[scopeKey] = jobId;
+    const pendingProgress: AgentArtifactDownloadProgress = {
       id: `pending-${Date.now()}`,
       url: artifactUrl,
       filename: artifactName || artifactUrl.split('/').pop()?.split('?')[0] || 'artifact',
@@ -168,11 +180,16 @@ export function AgentJobCenter() {
       totalBytes: 0,
       phase: 'started',
       message: '正在打开保存位置选择…',
-    });
+    };
+    setArtifactDownloadProgressByJob((current) => ({ ...current, [jobId]: pendingProgress }));
     const result = await handleAgentArtifactDownloadClick(event, artifactUrl, artifactName, window.electronAPI);
     if (result.error) {
+      delete artifactDownloadJobByUrlRef.current[scopeKey];
       setError(result.error);
-      setArtifactDownloadProgress((current) => current ? { ...current, phase: 'failed', message: result.error ?? '下载失败' } : current);
+      setArtifactDownloadProgressByJob((current) => current[jobId] ? {
+        ...current,
+        [jobId]: { ...current[jobId], phase: 'failed', message: result.error ?? '下载失败' },
+      } : current);
       message.error(result.error);
       return;
     }
@@ -395,7 +412,7 @@ export function AgentJobCenter() {
                     className="agent-job-download-button"
                     href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
                     title={`下载 ${artifact.name} (${formatArtifactSize(artifact.sizeBytes)})`}
-                    onClick={(event) => void handleArtifactDownload(event, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
+                    onClick={(event) => void handleArtifactDownload(event, activeJob.id, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
                   >
                     <DownloadOutlined className="agent-job-download-icon" aria-hidden="true" />
                     <span className="agent-job-download-label">下载</span>
@@ -404,7 +421,7 @@ export function AgentJobCenter() {
                   </Button>
                 ))}
               </Space>
-              {artifactDownloadProgress && <ArtifactDownloadProgressPanel progress={artifactDownloadProgress} />}
+              {visibleArtifactDownloadProgress && <ArtifactDownloadProgressPanel progress={visibleArtifactDownloadProgress} />}
               {showPartialArchiveArtifactWarning && (
                 <Alert
                   className="agent-job-partial-artifact-alert"
