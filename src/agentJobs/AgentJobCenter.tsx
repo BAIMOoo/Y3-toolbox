@@ -12,6 +12,7 @@ import { handleAgentArtifactDownloadClick } from './artifactDownload';
 import { getArtifactDownloadScopeKey, getVisibleArtifactDownloadProgress, isTerminalArtifactDownloadProgress, type AgentArtifactDownloadProgressByJob } from './artifactDownloadProgress';
 import { formatArtifactSize } from './formatArtifactSize';
 import { formatAgentJobListTime } from './formatAgentJobListTime';
+import { summarizeReadableMessage } from './readableMessage';
 import { createKkresStageRequestId, subscribeToActiveStageProgress, type StageProgressState } from './stageProgress';
 import type { AgentArtifactDownloadProgress } from '../types/electron';
 
@@ -402,25 +403,32 @@ export function AgentJobCenter() {
             <AgentJobLoadingState message="正在连接任务服务，连接成功后会显示任务详情。" />
           ) : activeJob ? (
             <div className="agent-job-detail">
-              <h3>{activeJob.skillLabel}</h3>
-              <p className="agent-job-summary">{activeJob.summary}</p>
-              <Space wrap className="agent-job-downloads">
-                {activeJobDownloadArtifacts.map((artifact) => (
-                  <Button
-                    key={artifact.id}
-                    size="large"
-                    className="agent-job-download-button"
-                    href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
-                    title={`下载 ${artifact.name} (${formatArtifactSize(artifact.sizeBytes)})`}
-                    onClick={(event) => void handleArtifactDownload(event, activeJob.id, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
-                  >
-                    <DownloadOutlined className="agent-job-download-icon" aria-hidden="true" />
-                    <span className="agent-job-download-label">下载</span>
-                    <span className="agent-job-download-name">{artifact.name}</span>
-                    <span className="agent-job-download-size">{formatArtifactSize(artifact.sizeBytes)}</span>
-                  </Button>
-                ))}
-              </Space>
+              <div className="agent-job-detail-hero">
+                <div className="agent-job-detail-hero__header">
+                  <div className="agent-job-detail-hero__title">
+                    <h3>{activeJob.skillLabel}</h3>
+                  </div>
+                  {activeJobDownloadArtifacts.length > 0 && (
+                    <Space wrap size={[8, 8]} className="agent-job-downloads">
+                      {activeJobDownloadArtifacts.map((artifact) => (
+                        <Button
+                          key={artifact.id}
+                          size="middle"
+                          className="agent-job-download-button"
+                          href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
+                          title={`下载 ${artifact.name} (${formatArtifactSize(artifact.sizeBytes)})`}
+                          onClick={(event) => void handleArtifactDownload(event, activeJob.id, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
+                        >
+                          <DownloadOutlined className="agent-job-download-icon" aria-hidden="true" />
+                          <span className="agent-job-download-label">下载</span>
+                          <span className="agent-job-download-size">{formatArtifactSize(artifact.sizeBytes)}</span>
+                        </Button>
+                      ))}
+                    </Space>
+                  )}
+                </div>
+                <ReadableJobMessage className="agent-job-summary" message={activeJob.summary} />
+              </div>
               {visibleArtifactDownloadProgress && <ArtifactDownloadProgressPanel progress={visibleArtifactDownloadProgress} />}
               {showPartialArchiveArtifactWarning && (
                 <Alert
@@ -466,6 +474,18 @@ export function AgentJobCenter() {
         </Card>
       </div>
     </section>
+  );
+}
+
+
+function ReadableJobMessage({ className, message }: { className: string; message: string }) {
+  const segments = summarizeReadableMessage(message);
+  return (
+    <span className={`agent-job-readable-lines ${className}`} aria-label={message}>
+      {segments.map((segment, index) => (
+        <span key={`${segment}-${index}`} className="agent-job-readable-line">{segment}</span>
+      ))}
+    </span>
   );
 }
 
