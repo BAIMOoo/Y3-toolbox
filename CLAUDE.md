@@ -8,13 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Y3 工具箱 — an Electron desktop app for Y3 game server archive analysis. Import archive-diff CSVs or local Archive JSON, browse timelines, inspect snapshot diffs, and submit agent tasks to a backend runner.
+Y3 工具箱 is an Electron desktop client for Y3 game archive analysis and public Agent tasks. Import archive-diff CSVs or local Archive JSON, browse timelines, inspect snapshot diffs, and submit jobs through the public service API.
 
 - **Tech stack**: Electron 28, React 19, Ant Design 6, Vite 8, TypeScript 5.9
 - **OS**: Windows development via WSL shell; the built Electron app runs as a native Windows process
-- **Public deployment**: `https://y3toolbox.b4im.com` via Cloudflare tunnel (served from a separate `Y3工具箱-public-runtime` checkout — do not touch that runtime from here unless explicitly asked)
+- **Agent service**: `https://y3toolbox.b4im.com`
+- **Backend repository**: `C:\Users\BAIM\Desktop\Y3-toolbox-backend-private` / `BAIMOoo/Y3-toolbox-backend-private`
 
-For detailed development workflows (dev backend, Electron verification, public runtime isolation, promotion), see `AGENTS.md`.
+For the client/backend ownership boundary and Electron verification workflow, see `AGENTS.md`.
 
 ## Commands
 
@@ -75,9 +76,9 @@ The renderer accesses Electron APIs via `window.electronAPI` (typed in `src/type
 
 `vite.config.ts` uses `vite-plugin-electron` for the main process and preload, plus `vite-plugin-electron-renderer` for Node.js polyfills in the renderer. The dev proxy forwards `/api` requests to the agent runner (default `http://127.0.0.1:8791` dev, `http://127.0.0.1:8790` production). `__AGENT_RUNNER_URL__` is defined at build time via `define`.
 
-### Agent runner backend
+### Agent service boundary
 
-`scripts/agent-runner/` contains a dev backend server (`server.ts`) with job store (`jobStore.ts`) and contracts (`contracts.ts`). It's started via `scripts/windows/start-dev-backend.ps1` (PowerShell on Windows). The runner dispatches Codex/agent jobs (fetch archive changes, mismatch logs, kkres image export) defined in the `.codex/skills/` directory.
+This repository owns the Agent Job Center UI, API callers, shared wire types, Electron proxy/download integration, and client compatibility presentation. Executable Runner code, provider/model selection, private skills, sanitization, queue/persistence logic, proxy implementation, backend tests, operations, and deployment documentation live in the private backend repository.
 
 ### State management
 
@@ -95,17 +96,11 @@ Two UI tones — `graphite` (dark) and `paper` (light) — implemented via Ant D
 - Electron-specific tests (e.g., `electron-mainline-smoke.test.ts`, `electron/startupOpenPath.test.ts`) test main-process logic in node environment
 - Tests that need browser APIs use jsdom via `// @vitest-environment jsdom` directive
 
-## Previous Codex artifacts (`.codex/`)
+## Project Codex Skills (`.codex/`)
 
-The `.codex/` directory contains skills from prior Codex-based development:
-
-| Skill | Status |
-|---|---|
-| `fetch-archive-changes` | Already available as a Claude skill; Python scripts in `.codex/skills/fetch-archive-changes/scripts/` are still used by the agent runner |
-| `fetch-mismatch-logs` | Powershell + Python scripts in `.codex/skills/fetch-mismatch-logs/scripts/`; used by the agent runner |
-| `export-kkres-image` | Python scripts in `.codex/skills/export-kkres-image/scripts/`; Y3 editor automation for kkres export |
-
-These scripts are dependencies of the agent runner backend — do not delete them without confirming the runner no longer references them. The SKILL.md files describe workflows that the agent runner's Codex integration follows.
+- `guard-public-backend-repo` enforces the client/private-backend ownership boundary.
+- Client-owned project skills may remain here when they do not execute or operate the public service.
+- Server-owned skills belong in the private backend repository and must not be copied into this client checkout.
 
 ## Key files
 
@@ -114,5 +109,5 @@ These scripts are dependencies of the agent runner backend — do not delete the
 - `src/parser/csvParser.ts` — CSV parsing with raw/clean format auto-detection (500MB limit in `src/constants/fileLimits.ts`)
 - `src/archiveViewer/archiveModel.ts` — Archive data model: normalization, player/slot extraction, Lua-like table parser
 - `electron/main.ts` — All IPC handlers and Electron lifecycle
-- `scripts/agent-runner/server.ts` — Dev backend agent job server
+- `src/agentJobs/api.ts` — Public Agent service API client
 - `scripts/recovery-tool.ts` — CLI tool for log recovery/extraction (runnable via `npm run recovery`)

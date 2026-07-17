@@ -8,7 +8,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.{js,ts}', 'scripts/agent-runner/**/*.test.{js,ts}', 'scripts/recovery/**/*.test.{js,ts}', 'scripts/release/**/*.test.{js,ts}', 'scripts/windows/**/*.test.{js,ts}', '*.test.{js,ts}'],
+    include: ['src/**/*.test.{js,ts}', 'scripts/recovery/**/*.test.{js,ts}', 'scripts/release/**/*.test.{js,ts}', '*.test.{js,ts}'],
     exclude: ['node_modules/**', '.worktrees/**', '.omx/**', '**/.omx/**', '**/scratch/**'],
     // Use a single vmThreads worker to avoid fork/worker startup timeouts in WSL/Windows worktrees.
     pool: 'vmThreads',
