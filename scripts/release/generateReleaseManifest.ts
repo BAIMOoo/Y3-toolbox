@@ -59,6 +59,9 @@ export function buildReleaseManifest(input: ReleaseManifestInput): ReleaseManife
   assertSemver(input.backendVersion, 'backendVersion');
   assertSemver(input.minimumClientVersion, 'minimumClientVersion');
   assertSupportedClientRange(input.supportedClientRange, input.minimumClientVersion);
+  assertVersionInSupportedRange(input.clientVersion, input.supportedClientRange, 'clientVersion');
+  if (input.releaseTag !== `v${input.clientVersion}`) throw new Error('releaseTag must equal v<clientVersion>');
+  if (input.releaseTrainId !== input.releaseTag) throw new Error('releaseTrainId must equal releaseTag');
   for (const field of ['releaseTrainId', 'commit', 'builtAt', 'releaseTag', 'latestClientUrl', 'releaseNotesUrl', 'publicRuntimeTarget', 'portableArtifactName'] as const) {
     if (!input[field].trim()) throw new Error(`${field} is required`);
   }
@@ -167,6 +170,23 @@ function assertSupportedClientRange(range: string, minimumClientVersion: string)
     return;
   }
   throw new Error('supportedClientRange must be >=x.y.z or x.y.z - a.b.c');
+}
+
+function assertVersionInSupportedRange(version: string, range: string, label: string): void {
+  const parsedVersion = parseVersion(version);
+  if (!parsedVersion) throw new Error(`${label} must be semver-like x.y.z`);
+  const gte = range.match(/^>=(\d+\.\d+\.\d+)$/);
+  if (gte) {
+    const lower = parseVersion(gte[1]);
+    if (lower && compareVersions(parsedVersion, lower) >= 0) return;
+  }
+  const between = range.match(/^(\d+\.\d+\.\d+)\s+-\s+(\d+\.\d+\.\d+)$/);
+  if (between) {
+    const lower = parseVersion(between[1]);
+    const upper = parseVersion(between[2]);
+    if (lower && upper && compareVersions(parsedVersion, lower) >= 0 && compareVersions(parsedVersion, upper) <= 0) return;
+  }
+  throw new Error(`supportedClientRange must include ${label}`);
 }
 
 function parseVersion(value: string): [number, number, number] | null {

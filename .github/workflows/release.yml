@@ -1,9 +1,6 @@
 name: Release Windows App
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -25,6 +22,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-windows-app
+  cancel-in-progress: false
 
 jobs:
   build-windows:
@@ -64,12 +65,12 @@ jobs:
       - name: Generate release train manifest
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
-          RELEASE_TRAIN_ID: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TRAIN_ID: ${{ inputs.release_tag }}
           RELEASE_COMMIT: ${{ github.sha }}
-          RELEASE_BACKEND_VERSION: ${{ inputs.backend_version || vars.RELEASE_BACKEND_VERSION }}
-          RELEASE_MINIMUM_CLIENT_VERSION: ${{ inputs.minimum_client_version || vars.RELEASE_MINIMUM_CLIENT_VERSION }}
-          RELEASE_SUPPORTED_CLIENT_RANGE: ${{ inputs.supported_client_range || vars.RELEASE_SUPPORTED_CLIENT_RANGE }}
+          RELEASE_BACKEND_VERSION: ${{ inputs.backend_version }}
+          RELEASE_MINIMUM_CLIENT_VERSION: ${{ inputs.minimum_client_version }}
+          RELEASE_SUPPORTED_CLIENT_RANGE: ${{ inputs.supported_client_range }}
           RELEASE_LATEST_CLIENT_URL: https://github.com/BAIMOoo/Y3-toolbox/releases/latest
           RELEASE_NOTES_URL: https://github.com/BAIMOoo/Y3-toolbox/releases/latest
         run: |
@@ -90,7 +91,7 @@ jobs:
           if (-not $portable) {
             throw 'Portable executable was not produced.'
           }
-          $releaseTag = '${{ inputs.release_tag || github.ref_name }}'
+          $releaseTag = '${{ inputs.release_tag }}'
           $version = $releaseTag -replace '^v', ''
           Copy-Item -LiteralPath $portable.FullName -Destination "release/Y3-Toolbox-$version.exe" -Force
           if (-not (Test-Path -LiteralPath 'release/release-manifest.json')) {
@@ -101,18 +102,44 @@ jobs:
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
         with:
-          name: y3-toolbox-windows-${{ inputs.release_tag || github.ref_name || 'manual' }}
+          name: y3-toolbox-windows-${{ inputs.release_tag }}
           path: |
             release/*.exe
             release/release-manifest.json
           if-no-files-found: error
           retention-days: 30
 
+      - name: Reject an existing release identity
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          foreach ($candidate in @(
+            @{ label = 'tag'; uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/git/ref/tags/$env:RELEASE_TAG" },
+            @{ label = 'release'; uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RELEASE_TAG" }
+          )) {
+            $exists = $false
+            try {
+              Invoke-RestMethod -Headers $headers -Uri $candidate.uri -Method Get | Out-Null
+              $exists = $true
+            } catch {
+              $status = [int]$_.Exception.Response.StatusCode
+              if ($status -ne 404) { throw }
+            }
+            if ($exists) { throw "$($candidate.label) already exists: $env:RELEASE_TAG" }
+          }
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release_tag || github.ref_name }}
-          name: ${{ inputs.release_tag || github.ref_name }}
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ inputs.release_tag }}
+          target_commitish: ${{ github.sha }}
           files: |
             release/*.exe
             release/release-manifest.json

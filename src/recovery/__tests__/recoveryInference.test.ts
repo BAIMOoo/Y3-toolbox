@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ArchiveChange, TimePoint } from '../../types';
 import { getSlotPrefix, inferRecoveryFragments, resolveRecoveryIdentity } from '../recoveryInference';
+import { compareOrdinalStrings } from '../recoveryOrdering';
 
 function change(key: string, oldValue: string, newValue: string): ArchiveChange {
   const keyParts = key.split('-');
@@ -19,6 +20,12 @@ function tp(timestamp: string, changes: ArchiveChange[]): TimePoint {
 }
 
 const identity = { fileName: 'player_abc.csv' };
+
+describe('compareOrdinalStrings', () => {
+  it('orders Chinese field names independently of the host locale', () => {
+    expect(['绑定状态', '物品数量'].sort(compareOrdinalStrings)).toEqual(['物品数量', '绑定状态']);
+  });
+});
 
 describe('inferRecoveryFragments', () => {
   it('sorts time points by default so direct callers with unsorted input remain correct', () => {

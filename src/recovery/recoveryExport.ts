@@ -1,4 +1,5 @@
 import type { RecoveryFieldEntry, RecoveryInferenceResult } from './recoveryInference';
+import { compareOrdinalStrings } from './recoveryOrdering';
 
 interface ArchiveJsonTypedValue<T> {
   type: string;
@@ -105,9 +106,9 @@ function isMutableJsonObject(value: unknown): value is MutableJsonObject {
 }
 
 function compareExportFields(a: RecoveryFieldEntry, b: RecoveryFieldEntry): number {
-  return a.slotPrefix.localeCompare(b.slotPrefix)
-    || a.key.localeCompare(b.key)
-    || String(a.sourceTimestamp ?? '').localeCompare(String(b.sourceTimestamp ?? ''));
+  return compareOrdinalStrings(a.slotPrefix, b.slotPrefix)
+    || compareOrdinalStrings(a.key, b.key)
+    || compareOrdinalStrings(String(a.sourceTimestamp ?? ''), String(b.sourceTimestamp ?? ''));
 }
 
 function slotSortCompare(left: string, right: string): number {
@@ -116,7 +117,7 @@ function slotSortCompare(left: string, right: string): number {
   if (leftNumber !== null && rightNumber !== null) return leftNumber - rightNumber;
   if (leftNumber !== null) return -1;
   if (rightNumber !== null) return 1;
-  return left.localeCompare(right);
+  return compareOrdinalStrings(left, right);
 }
 
 function numericSlotId(value: string): number | null {

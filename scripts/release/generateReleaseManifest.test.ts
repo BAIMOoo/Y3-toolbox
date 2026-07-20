@@ -60,6 +60,9 @@ describe('release manifest generator', () => {
     expect(() => buildReleaseManifest({ ...baseInput, clientVersion: '0.1.6-beta.1' })).toThrow(/clientVersion/);
     expect(() => buildReleaseManifest({ ...baseInput, supportedClientRange: '^0.1.0' })).toThrow(/supportedClientRange/);
     expect(() => buildReleaseManifest({ ...baseInput, minimumClientVersion: '0.1.6', supportedClientRange: '0.1.0 - 0.1.5' })).toThrow(/include minimumClientVersion/);
+    expect(() => buildReleaseManifest({ ...baseInput, clientVersion: '0.1.7', supportedClientRange: '0.1.0 - 0.1.6' })).toThrow(/include clientVersion/);
+    expect(() => buildReleaseManifest({ ...baseInput, releaseTag: 'v0.1.7' })).toThrow(/releaseTag must equal/);
+    expect(() => buildReleaseManifest({ ...baseInput, releaseTrainId: 'train-other' })).toThrow(/releaseTrainId must equal/);
   });
 
   it('derives required fields from package and explicit workflow environment', () => {

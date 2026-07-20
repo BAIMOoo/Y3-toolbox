@@ -18,9 +18,9 @@ describe('GitHub release workflow contract', () => {
     expect(workflow).toContain('backend_version:');
     expect(workflow).toContain('minimum_client_version:');
     expect(workflow).toContain('supported_client_range:');
-    expect(workflow).toContain('RELEASE_BACKEND_VERSION: ${{ inputs.backend_version || vars.RELEASE_BACKEND_VERSION }}');
-    expect(workflow).toContain('RELEASE_MINIMUM_CLIENT_VERSION: ${{ inputs.minimum_client_version || vars.RELEASE_MINIMUM_CLIENT_VERSION }}');
-    expect(workflow).toContain('RELEASE_SUPPORTED_CLIENT_RANGE: ${{ inputs.supported_client_range || vars.RELEASE_SUPPORTED_CLIENT_RANGE }}');
+    expect(workflow).toContain('RELEASE_BACKEND_VERSION: ${{ inputs.backend_version }}');
+    expect(workflow).toContain('RELEASE_MINIMUM_CLIENT_VERSION: ${{ inputs.minimum_client_version }}');
+    expect(workflow).toContain('RELEASE_SUPPORTED_CLIENT_RANGE: ${{ inputs.supported_client_range }}');
     expect(workflow).toContain("throw 'backend_version workflow input is required'");
     expect(workflow).toContain('$env:RELEASE_BUILT_AT = (Get-Date).ToUniversalTime().ToString("o")');
     expect(workflow).toContain('scripts/release/generateReleaseManifest.ts --output release/release-manifest.json');
@@ -28,5 +28,16 @@ describe('GitHub release workflow contract', () => {
     expect(workflow).toContain('release/*.exe');
     expect(workflow).not.toContain('RELEASE_PUBLIC_RUNTIME_TARGET_ROOT');
     expect(workflow).not.toMatch(/[A-Za-z]:\\/);
+  });
+
+  it('publishes only from explicit dispatch inputs and pins the tag to the built commit', () => {
+    expect(workflow).toContain('workflow_dispatch:');
+    expect(workflow).not.toContain('push:');
+    expect(workflow).not.toContain('vars.RELEASE_');
+    expect(workflow).toContain('RELEASE_TAG: ${{ inputs.release_tag }}');
+    expect(workflow).toContain('target_commitish: ${{ github.sha }}');
+    expect(workflow).toContain('Reject an existing release identity');
+    expect(workflow).toContain("if ($exists) { throw \"$($candidate.label) already exists: $env:RELEASE_TAG\" }");
+    expect(workflow).toContain('group: release-windows-app');
   });
 });

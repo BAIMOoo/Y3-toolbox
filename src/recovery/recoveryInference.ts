@@ -1,4 +1,5 @@
 import type { ArchiveChange, ChangeType, TimePoint } from '../types';
+import { compareOrdinalStrings } from './recoveryOrdering';
 
 export type PlayerIdentifierSource = 'aid-from-log' | 'filename';
 export type ExpectedSchemaSource = 'none' | 'explicit';
@@ -145,7 +146,7 @@ export function inferRecoveryFragments(options: RecoveryInferenceOptions): Recov
     fragment.fields.push(field);
   }
 
-  const fragments = [...fragmentMap.values()].sort((a, b) => a.slotPrefix.localeCompare(b.slotPrefix));
+  const fragments = [...fragmentMap.values()].sort((a, b) => compareOrdinalStrings(a.slotPrefix, b.slotPrefix));
 
   return {
     version: 1,
@@ -193,7 +194,7 @@ function getGroupingStrategy(keyParts: string[]): GroupingStrategy {
 }
 
 function compareFields(a: RecoveryFieldEntry, b: RecoveryFieldEntry): number {
-  return a.slotPrefix.localeCompare(b.slotPrefix)
-    || a.key.localeCompare(b.key)
-    || String(a.sourceTimestamp ?? '').localeCompare(String(b.sourceTimestamp ?? ''));
+  return compareOrdinalStrings(a.slotPrefix, b.slotPrefix)
+    || compareOrdinalStrings(a.key, b.key)
+    || compareOrdinalStrings(String(a.sourceTimestamp ?? ''), String(b.sourceTimestamp ?? ''));
 }

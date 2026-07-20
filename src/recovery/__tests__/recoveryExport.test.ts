@@ -72,6 +72,7 @@ describe('recovery export serializers', () => {
     const second = serializeRecoveryJson(sampleResult());
     expect(second).toBe(first);
     expect(Object.keys(JSON.parse(first))).toEqual(['74', '82']);
+    expect(Object.keys(JSON.parse(first)['74'].data_value.value['20007'])).toEqual(['物品数量', '绑定状态']);
   });
 
   it('builds safe export base names', () => {
