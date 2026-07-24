@@ -1,13 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import type { RecoveryFieldEntry, RecoverySlotFragment } from './recoveryInference';
+import { parseStructuredRecoveryValue, type ParsedRecoveryValue } from './recoveryValue';
 
 interface RecoveryPreviewTreeProps {
   fragments: RecoverySlotFragment[];
 }
 
 type RecoveryPreviewTreeNode = RecoveryPreviewGroupNode | RecoveryPreviewFieldNode | RecoveryPreviewValueGroupNode | RecoveryPreviewValueNode;
-
-type ParsedRecoveryValue = Record<string, unknown> | unknown[];
 
 interface RecoveryPreviewBaseNode {
   key: string;
@@ -139,139 +138,6 @@ function valueToNode(label: string, value: unknown, field: RecoveryFieldEntry, k
     };
   }
   return { kind: 'value', key, label, depth, value, field };
-}
-
-function parseStructuredRecoveryValue(value: string | null): ParsedRecoveryValue | null {
-  if (typeof value !== 'string') return null;
-  const text = value.trim();
-  if (!((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']')))) return null;
-  try {
-    const parsed = new PythonLikeValueParser(text).parse();
-    return isPlainObject(parsed) || Array.isArray(parsed) ? parsed as ParsedRecoveryValue : null;
-  } catch {
-    return null;
-  }
-}
-
-class PythonLikeValueParser {
-  private index = 0;
-
-  private readonly text: string;
-
-  constructor(text: string) {
-    this.text = text;
-  }
-
-  parse(): unknown {
-    const value = this.parseValue();
-    this.skipWhitespace();
-    if (!this.isAtEnd()) throw new Error('Unexpected trailing text');
-    return value;
-  }
-
-  private parseValue(): unknown {
-    this.skipWhitespace();
-    const char = this.peek();
-    if (char === '{') return this.parseObject();
-    if (char === '[') return this.parseArray();
-    if (char === '"' || char === "'") return this.parseString();
-    return this.parseAtom();
-  }
-
-  private parseObject(): Record<string, unknown> {
-    this.expect('{');
-    const result: Record<string, unknown> = {};
-    while (true) {
-      this.skipWhitespace();
-      if (this.peek() === '}') {
-        this.index += 1;
-        return result;
-      }
-      const key = String(this.parseValue());
-      this.skipWhitespace();
-      this.expect(':');
-      result[key] = this.parseValue();
-      this.skipWhitespace();
-      if (this.peek() === ',') {
-        this.index += 1;
-        continue;
-      }
-      if (this.peek() === '}') continue;
-      throw new Error('Expected object separator');
-    }
-  }
-
-  private parseArray(): unknown[] {
-    this.expect('[');
-    const result: unknown[] = [];
-    while (true) {
-      this.skipWhitespace();
-      if (this.peek() === ']') {
-        this.index += 1;
-        return result;
-      }
-      result.push(this.parseValue());
-      this.skipWhitespace();
-      if (this.peek() === ',') {
-        this.index += 1;
-        continue;
-      }
-      if (this.peek() === ']') continue;
-      throw new Error('Expected array separator');
-    }
-  }
-
-  private parseString(): string {
-    const quote = this.peek();
-    if (quote !== '"' && quote !== "'") throw new Error('Expected string');
-    this.index += 1;
-    let result = '';
-    while (!this.isAtEnd()) {
-      const char = this.text[this.index++];
-      if (char === quote) return result;
-      if (char === '\\' && !this.isAtEnd()) {
-        const next = this.text[this.index++];
-        if (next === quote || next === '\\') result += next;
-        else result += `\\${next}`;
-      } else {
-        result += char;
-      }
-    }
-    throw new Error('Unclosed string');
-  }
-
-  private parseAtom(): unknown {
-    const start = this.index;
-    while (!this.isAtEnd()) {
-      const char = this.peek();
-      if (char === ',' || char === '}' || char === ']') break;
-      this.index += 1;
-    }
-    const raw = this.text.slice(start, this.index).trim();
-    if (!raw) throw new Error('Expected atom');
-    if (/^(true|True)$/i.test(raw)) return true;
-    if (/^(false|False)$/i.test(raw)) return false;
-    if (/^(nil|null|None)$/i.test(raw)) return null;
-    if (/^-?\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
-    return raw;
-  }
-
-  private skipWhitespace(): void {
-    while (!this.isAtEnd() && /\s/.test(this.peek())) this.index += 1;
-  }
-
-  private expect(char: string): void {
-    if (this.peek() !== char) throw new Error(`Expected ${char}`);
-    this.index += 1;
-  }
-
-  private peek(): string {
-    return this.text[this.index] ?? '';
-  }
-
-  private isAtEnd(): boolean {
-    return this.index >= this.text.length;
-  }
 }
 
 function compareTreeNodes(left: RecoveryPreviewTreeNode, right: RecoveryPreviewTreeNode): number {

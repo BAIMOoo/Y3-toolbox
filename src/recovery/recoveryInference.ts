@@ -44,6 +44,8 @@ export interface RecoveryFieldEntry {
   recoveryValue: string | null;
   observedNewValue: string | null;
   sourceTimestamp: string | null;
+  sourceOrder: number | null;
+  dayValueOld: string | null;
   changeType: ChangeType | null;
   evidenceStatus: EvidenceStatus;
   source: 'archive_diff' | 'expected-field';
@@ -74,7 +76,8 @@ export function inferRecoveryFragments(options: RecoveryInferenceOptions): Recov
   const identity = resolveRecoveryIdentity(options.identity);
   const startMs = options.targetStartTime.getTime();
   const endMs = options.targetEndTime?.getTime() ?? null;
-  const firstChanges = new Map<string, { change: ArchiveChange; timestamp: Date }>();
+  const firstChanges = new Map<string, { change: ArchiveChange; timestamp: Date; sourceOrder: number }>();
+  let sourceOrder = 0;
 
   const orderedTimePoints = options.assumeSortedTimePoints
     ? options.timePoints
@@ -87,13 +90,14 @@ export function inferRecoveryFragments(options: RecoveryInferenceOptions): Recov
 
     for (const change of timePoint.changes) {
       if (!firstChanges.has(change.key)) {
-        firstChanges.set(change.key, { change, timestamp: timePoint.timestamp });
+        firstChanges.set(change.key, { change, timestamp: timePoint.timestamp, sourceOrder });
       }
+      sourceOrder += 1;
     }
   }
 
   const fields: RecoveryFieldEntry[] = [];
-  for (const { change, timestamp } of firstChanges.values()) {
+  for (const { change, timestamp, sourceOrder: changeSourceOrder } of firstChanges.values()) {
     const slotPrefix = getSlotPrefix(change.keyParts, change.key);
     fields.push({
       key: change.key,
@@ -102,6 +106,8 @@ export function inferRecoveryFragments(options: RecoveryInferenceOptions): Recov
       recoveryValue: change.oldValue,
       observedNewValue: change.newValue,
       sourceTimestamp: timestamp.toISOString(),
+      sourceOrder: changeSourceOrder,
+      dayValueOld: change.limitMetadata?.dayValueOld ?? null,
       changeType: change.changeType,
       evidenceStatus: 'proven',
       source: 'archive_diff',
@@ -121,6 +127,8 @@ export function inferRecoveryFragments(options: RecoveryInferenceOptions): Recov
       recoveryValue: null,
       observedNewValue: null,
       sourceTimestamp: null,
+      sourceOrder: null,
+      dayValueOld: null,
       changeType: null,
       evidenceStatus: 'evidence-insufficient',
       source: 'expected-field',

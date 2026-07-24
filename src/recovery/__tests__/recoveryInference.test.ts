@@ -41,6 +41,7 @@ describe('inferRecoveryFragments', () => {
     expect(result.fields[0]).toMatchObject({
       recoveryValue: '100',
       sourceTimestamp: '2026-03-20T10:05:00.000Z',
+      sourceOrder: 0,
     });
   });
 
@@ -58,6 +59,7 @@ describe('inferRecoveryFragments', () => {
     expect(result.fields[0]).toMatchObject({
       recoveryValue: '100',
       sourceTimestamp: '2026-03-20T10:05:00.000Z',
+      sourceOrder: 0,
     });
   });
 
@@ -78,11 +80,30 @@ describe('inferRecoveryFragments', () => {
       recoveryValue: '100',
       observedNewValue: '50',
       sourceTimestamp: '2026-03-20T10:05:00.000Z',
+      sourceOrder: 0,
       evidenceStatus: 'proven',
     });
   });
 
+  it('preserves source order and old day-value evidence before presentation sorting', () => {
+    const laterLexicalKey = change('139-z', '4', '5');
+    laterLexicalKey.limitMetadata = { dayValueOld: '6', dayValueNew: '7', maxValue: '99' };
+    const result = inferRecoveryFragments({
+      identity,
+      targetStartTime: new Date('2026-03-20T10:00:00Z'),
+      timePoints: [tp('2026-03-20T10:05:00Z', [laterLexicalKey, change('139-a', '1', '2')])],
+    });
 
+    expect(result.fields.map((field) => field.key)).toEqual(['139-a', '139-z']);
+    expect(result.fields.find((field) => field.key === '139-z')).toMatchObject({
+      sourceOrder: 0,
+      dayValueOld: '6',
+    });
+    expect(result.fields.find((field) => field.key === '139-a')).toMatchObject({
+      sourceOrder: 1,
+      dayValueOld: null,
+    });
+  });
 
   it('collects first changes for different fields across the whole post-target log, not just one frame', () => {
     const result = inferRecoveryFragments({
