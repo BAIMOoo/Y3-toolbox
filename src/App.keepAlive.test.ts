@@ -14,6 +14,7 @@ const goToFirst = vi.fn();
 const goToLast = vi.fn();
 const downloadCleanCsv = vi.fn();
 const timelineMounts = vi.fn();
+const technicalQaMounts = vi.fn();
 
 const loadedTimePoints: TimePoint[] = [
   { index: 0, timestamp: new Date('2026-03-20T10:00:00'), changes: [{ key: '100-1', keyParts: ['100', '1'], rootKey: '100', oldValue: 'nil', newValue: '1', changeType: 'create' }] },
@@ -123,6 +124,19 @@ vi.mock('./agentJobs/AgentJobCenter', () => ({
   AgentJobCenter: () => React.createElement('section', { 'data-testid': 'agent-job-center' }, 'agent jobs'),
 }));
 
+vi.mock('./technicalQa/TechnicalQaWorkspace', () => ({
+  TechnicalQaWorkspace: () => {
+    useEffect(() => {
+      technicalQaMounts();
+    }, []);
+    return React.createElement(
+      'section',
+      { 'data-testid': 'technical-qa-workspace' },
+      React.createElement('input', { 'aria-label': 'technical qa draft' }),
+    );
+  },
+}));
+
 vi.mock('./recovery/RecoveryPanel', () => ({
   RecoveryPanel: () => React.createElement('section', { 'data-testid': 'recovery-panel' }, 'recovery'),
 }));
@@ -133,8 +147,8 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-describe('App Change Log keep-alive behavior', () => {
-  it('keeps loaded Change Log work position mounted and hidden, not remounted, across top-level module switches', async () => {
+describe('App workspace keep-alive behavior', () => {
+  it('preserves Change Log and Technical QA state across all top-level module switches', async () => {
     const { default: App } = await import('./App');
     render(React.createElement(App));
 
@@ -143,6 +157,10 @@ describe('App Change Log keep-alive behavior', () => {
     expect(screen.getByTestId('filter-state').textContent).toContain('gold');
     expect(timelineMounts).toHaveBeenCalledTimes(1);
     const initialWorkspace = screen.getByTestId('diff-workspace');
+    const initialTechnicalQaShell = screen.getByTestId('technical-qa-shell');
+
+    expect(initialTechnicalQaShell.hasAttribute('hidden')).toBe(true);
+    expect(technicalQaMounts).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: '本地 Archive' }));
 
@@ -153,6 +171,20 @@ describe('App Change Log keep-alive behavior', () => {
     expect(inactiveWorkspace.querySelector('[data-testid="timeline-sentinel"]')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '变动日志' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '技术问答' }));
+    expect(screen.getByTestId('technical-qa-shell')).toBe(initialTechnicalQaShell);
+    expect(initialTechnicalQaShell.hasAttribute('hidden')).toBe(false);
+    const qaDraft = screen.getByRole('textbox', { name: 'technical qa draft' }) as HTMLInputElement;
+    fireEvent.change(qaDraft, { target: { value: 'persistent question' } });
+
+    fireEvent.click(screen.getByRole('button', { name: '本地 Archive' }));
+    expect(initialTechnicalQaShell.hasAttribute('hidden')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '技术问答' }));
+
+    expect(screen.getByTestId('technical-qa-shell')).toBe(initialTechnicalQaShell);
+    expect((screen.getByRole('textbox', { name: 'technical qa draft' }) as HTMLInputElement).value).toBe('persistent question');
+    expect(technicalQaMounts).toHaveBeenCalledTimes(1);
 
     expect(screen.getByTestId('timeline-sentinel').textContent).toContain('selected:2');
     expect(screen.getByTestId('filter-state').textContent).toContain('gold');

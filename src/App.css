@@ -179,6 +179,10 @@ body {
   overflow: hidden;
 }
 
+.app-shell--technical-qa {
+  overflow: hidden;
+}
+
 .app-shell-header {
   -webkit-app-region: drag;
   position: sticky;
@@ -305,11 +309,27 @@ body {
   display: none;
 }
 
+.technical-qa-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.technical-qa-shell[hidden] {
+  display: none;
+}
+
 .app-content--local-archive {
   overflow: hidden;
 }
 
 .app-content--agent-jobs {
+  overflow: hidden;
+}
+
+.app-content--technical-qa {
   overflow: hidden;
 }
 
@@ -1965,6 +1985,21 @@ button {
 @media (max-width: 760px) {
   .app-tone-nav {
     order: 3;
+  }
+
+  .app-mode-nav {
+    flex-basis: 100%;
+    order: 4;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .app-mode-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-mode-nav .ant-segmented {
+    min-width: max-content;
   }
 }
 
