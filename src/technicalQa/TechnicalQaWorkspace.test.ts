@@ -100,7 +100,7 @@ describe('TechnicalQaWorkspaceView', () => {
   ] as Array<[string, QaTerminalOutcome]>)('renders the %s terminal state', (_kind, outcome) => {
     renderWorkspace(stateWith([thread('thread-1', [turn('q-1', terminalState(outcome))], '终态会话')]));
 
-    const expected = outcome.kind === 'follow_up' ? outcome.prompt : outcome.message;
+    const expected = outcome.kind === 'follow_up' ? outcome.prompt : 'message' in outcome ? outcome.message : '';
     expect(screen.getByText(expected)).toBeTruthy();
   });
 
