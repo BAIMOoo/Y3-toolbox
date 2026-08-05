@@ -26,6 +26,7 @@ const PUBLIC_ERROR_MESSAGES: Record<QaPublicErrorCode, string> = {
   invalid_cursor: 'The answer stream cursor was invalid.',
   cursor_expired: 'The answer stream expired. Please submit the question again.',
   rate_limited: 'Technical QA is busy. Please try again shortly.',
+  retrieval_unavailable: 'Technical QA could not retrieve evidence. Please try again.',
   service_unavailable: GENERIC_UNAVAILABLE_MESSAGE,
   request_timeout: 'The Technical QA request timed out. Please try again.',
   internal_error: 'Technical QA could not complete the request.',
