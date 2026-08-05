@@ -8,7 +8,7 @@ import { TechnicalQaWorkspaceView } from './TechnicalQaWorkspace';
 import type { QaDomain, QaTerminalOutcome } from './types';
 
 vi.mock('antd', () => ({
-  Button: ({ children, disabled, onClick, loading, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean }) => (
+  Button: ({ children, disabled, onClick, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean }) => (
     React.createElement('button', { ...props, disabled, onClick }, children)
   ),
   Segmented: ({ value, options, onChange, disabled }: {
