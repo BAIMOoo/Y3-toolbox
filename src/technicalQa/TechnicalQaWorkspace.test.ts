@@ -1,8 +1,8 @@
-﻿// @vitest-environment jsdom
+// @vitest-environment jsdom
 import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { QaThreadSession, TechnicalQaController, TechnicalQaState } from './controller';
+import type { QaThreadSession, TechnicalQaController, TechnicalQaState } from './TechnicalQaWorkspace';
 import { createInitialQaTurnState, type QaTurnState } from './reducer';
 import { TechnicalQaWorkspaceView } from './TechnicalQaWorkspace';
 import type { QaDomain, QaTerminalOutcome } from './types';
@@ -47,10 +47,10 @@ describe('TechnicalQaWorkspaceView', () => {
     const { container } = renderWorkspace(state, controller);
 
     expect(screen.getByText('Y3 2.0')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'ECA / 编辑器' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'ECA / 编辑器' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByText(/provider|model|project path/i)).toBeNull();
     expect(screen.getByText('服务已就绪，历史与引用会保留在当前工作区。')).toBeTruthy();
-    expect(container.querySelector('.technical-qa__transcript')?.hasAttribute('aria-live')).toBe(false);
+    expect(container.querySelector('.technical-qa__transcript')).not.toHaveAttribute('aria-live');
 
     const composer = screen.getByRole('textbox', { name: '技术问题' });
     fireEvent.keyDown(composer, { key: 'Enter' });
@@ -100,7 +100,7 @@ describe('TechnicalQaWorkspaceView', () => {
   ] as Array<[string, QaTerminalOutcome]>)('renders the %s terminal state', (_kind, outcome) => {
     renderWorkspace(stateWith([thread('thread-1', [turn('q-1', terminalState(outcome))], '终态会话')]));
 
-    const expected = outcome.kind === 'follow_up' ? outcome.prompt : 'message' in outcome ? outcome.message : '';
+    const expected = outcome.kind === 'follow_up' ? outcome.prompt : outcome.message;
     expect(screen.getByText(expected)).toBeTruthy();
   });
 
@@ -127,7 +127,7 @@ describe('TechnicalQaWorkspaceView', () => {
     renderWorkspace(state, controller);
 
     expect((screen.getByRole('textbox', { name: '技术问题' }) as HTMLTextAreaElement).value).toBe('保留中的草稿');
-    expect((screen.getByRole('button', { name: '提问' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /提问/ }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: /重新检查/ }));
     expect(controller.refreshHealth).toHaveBeenCalledOnce();
   });
@@ -165,7 +165,7 @@ function stateWith(threads: QaThreadSession[]): TechnicalQaState {
   };
 }
 
-function thread(key: string, turns: QaThreadSession['turns'], title = turns[0]?.question ?? '新问题') : QaThreadSession {
+function thread(key: string, turns: QaThreadSession['turns'], title = turns[0]?.question ?? '新问题'): QaThreadSession {
   return {
     key,
     threadId: `server-${key}`,
