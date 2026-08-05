@@ -20,6 +20,35 @@ afterEach(() => {
 });
 
 describe('Technical QA client-to-backend contract workflow', () => {
+  it('uploads selected diagnostic bytes before submitting only opaque references', async () => {
+    const question = 'Diagnose the attached Trace';
+    const fixture = new TechnicalQaHttpFixture(new Map([
+      [question, QA_CLIENT_EVENT_FIXTURES.ambiguousFollowUp],
+    ]));
+    vi.stubGlobal('fetch', vi.fn(fixture.fetch));
+    const controller = createController(['thread-key', 'client-upload-id', 'request-with-diagnostic']);
+
+    await controller.addAttachments([file('runtime.trace', 'text/plain', 'trace line')]);
+    controller.setDraft(question);
+    await controller.submit();
+
+    expect(fixture.calls.map((call) => call.url).slice(0, 2)).toEqual([
+      '/api/qa/diagnostic-uploads',
+      '/api/qa/turns',
+    ]);
+    expect(fixture.uploads).toEqual([expect.objectContaining({
+      clientUploadId: 'client-upload-id',
+      kind: 'trace',
+      displayName: 'runtime.trace',
+      contentBase64: btoa('trace line'),
+    })]);
+    expect(fixture.submissions[0]?.diagnosticUploadIds).toEqual(['opaque-upload-1']);
+    expect(JSON.stringify(fixture.submissions)).not.toMatch(/contentBase64|(?:file|project|storage)?path/i);
+    expect(activeThread(controller).turns[0]?.attachments).toEqual([
+      { kind: 'trace', displayName: 'runtime.trace', decodedByteSize: 10 },
+    ]);
+  });
+
   it('drives ECA and Lua HTTP turns through strict polling into retained controller history', async () => {
     const fixture = new TechnicalQaHttpFixture(new Map([
       ['How does this ECA event work?', QA_CLIENT_EVENT_FIXTURES.ecaAnswer],
@@ -135,6 +164,7 @@ interface FixtureTurn {
 
 class TechnicalQaHttpFixture {
   readonly calls: FixtureCall[] = [];
+  readonly uploads: Array<Record<string, unknown>> = [];
   readonly submissions: QaQuestionRequest[] = [];
   readonly eventCursors: number[] = [];
   readonly cancelRequests: unknown[] = [];
@@ -164,6 +194,19 @@ class TechnicalQaHttpFixture {
     }
     if (method === 'POST' && parsedUrl.pathname === '/api/qa/turns') {
       return this.acceptTurn(body as QaQuestionRequest);
+    }
+    if (method === 'POST' && parsedUrl.pathname === '/api/qa/diagnostic-uploads') {
+      const upload = body as Record<string, unknown>;
+      this.uploads.push(upload);
+      return jsonResponse({
+        schemaVersion: 1,
+        uploadId: `opaque-upload-${this.uploads.length}`,
+        kind: upload.kind,
+        displayName: upload.displayName,
+        mediaType: upload.mediaType,
+        decodedByteSize: upload.decodedByteSize,
+        expiresAt: '2026-08-06T12:00:00.000Z',
+      }, 201);
     }
 
     const eventMatch = parsedUrl.pathname.match(/^\/api\/qa\/threads\/([^/]+)\/turns\/([^/]+)\/events$/);
@@ -282,4 +325,14 @@ function jsonResponse(payload: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function file(name: string, type: string, content: string): File {
+  const bytes = new TextEncoder().encode(content);
+  return {
+    name,
+    type,
+    size: bytes.byteLength,
+    arrayBuffer: vi.fn(async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)),
+  } as unknown as File;
 }

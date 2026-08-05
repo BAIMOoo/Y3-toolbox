@@ -10,6 +10,7 @@ describe('useTechnicalQaController', () => {
   it('keeps controller actions live after StrictMode replays the mount effect', async () => {
     const api: QaControllerApi = {
       health: vi.fn().mockResolvedValue({ available: true }),
+      uploadDiagnostic: vi.fn(),
       submit: vi.fn(),
       events: vi.fn(),
       cancel: vi.fn(),
@@ -29,6 +30,7 @@ describe('useTechnicalQaController', () => {
     let submitSignal: AbortSignal | undefined;
     const api: QaControllerApi = {
       health: vi.fn().mockResolvedValue({ available: true }),
+      uploadDiagnostic: vi.fn(),
       submit: vi.fn((_request, signal): Promise<QaQuestionAccepted> => {
         submitSignal = signal;
         return new Promise<QaQuestionAccepted>((_resolve, reject) => {

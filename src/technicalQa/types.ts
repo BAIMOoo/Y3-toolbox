@@ -20,6 +20,29 @@ export interface QaQuestionRequest {
   threadId?: string;
   question: string;
   scope: QaScope;
+  diagnosticUploadIds?: string[];
+}
+
+export type QaDiagnosticKind = 'log' | 'trace' | 'screenshot';
+
+export interface QaDiagnosticUploadRequest {
+  schemaVersion: 1;
+  clientUploadId: string;
+  kind: QaDiagnosticKind;
+  displayName: string;
+  mediaType: string;
+  decodedByteSize: number;
+  contentBase64: string;
+}
+
+export interface QaDiagnosticUploadAccepted {
+  schemaVersion: 1;
+  uploadId: string;
+  kind: QaDiagnosticKind;
+  displayName: string;
+  mediaType: string;
+  decodedByteSize: number;
+  expiresAt: string;
 }
 
 export interface QaQuestionAccepted {

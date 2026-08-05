@@ -1,5 +1,13 @@
 import { createInitialQaTurnState, reduceQaEventPage, type QaTurnState } from './reducer';
+import {
+  prepareQaAttachments,
+  toQaAttachmentSummary,
+  type PreparedQaAttachment,
+  type QaAttachmentSummary,
+} from './attachments';
 import type {
+  QaDiagnosticUploadAccepted,
+  QaDiagnosticUploadRequest,
   QaDomain,
   QaEventPage,
   QaEventRequest,
@@ -23,6 +31,7 @@ export interface QaCancelRequest {
 
 export interface QaControllerApi {
   health(signal?: AbortSignal): Promise<QaServiceHealth>;
+  uploadDiagnostic(request: QaDiagnosticUploadRequest, signal?: AbortSignal): Promise<QaDiagnosticUploadAccepted>;
   submit(request: QaQuestionRequest, signal?: AbortSignal): Promise<QaQuestionAccepted>;
   events(request: QaEventRequest, signal?: AbortSignal): Promise<QaEventPage>;
   cancel(request: QaCancelRequest, signal?: AbortSignal): Promise<void>;
@@ -33,6 +42,7 @@ export interface QaTranscriptTurn {
   question: string;
   domain: QaDomain;
   submittedAt: string;
+  attachments?: QaAttachmentSummary[];
   state: QaTurnState;
 }
 
@@ -53,6 +63,10 @@ export interface TechnicalQaState {
   serviceStatus: QaServiceStatus;
   serviceMessage?: string;
   submitting: boolean;
+  preparingAttachments: boolean;
+  pendingAttachments: PreparedQaAttachment[];
+  attachmentError?: string;
+  uploadProgress?: { completed: number; total: number };
 }
 
 export interface TechnicalQaControllerOptions {
@@ -142,6 +156,8 @@ export class TechnicalQaController {
       domain: 'eca_editor',
       serviceStatus: 'checking',
       submitting: false,
+      preparingAttachments: false,
+      pendingAttachments: [],
     };
   }
 
@@ -179,6 +195,30 @@ export class TechnicalQaController {
 
   setDomain = (domain: QaDomain): void => this.patch({ domain });
 
+  addAttachments = async (files: readonly File[]): Promise<void> => {
+    if (files.length === 0 || this.state.preparingAttachments || this.state.submitting || this.activeRun) return;
+    this.patch({ attachmentError: undefined, preparingAttachments: true });
+    try {
+      const prepared = await prepareQaAttachments(files, this.state.pendingAttachments, this.createId);
+      this.patch({ pendingAttachments: [...this.state.pendingAttachments, ...prepared], preparingAttachments: false });
+    } catch (error) {
+      this.patch({
+        attachmentError: error instanceof Error ? error.message : '附件无法读取。',
+        preparingAttachments: false,
+      });
+    }
+  };
+
+  removeAttachment = (clientUploadId: string): void => {
+    if (this.state.preparingAttachments || this.state.submitting || this.activeRun) return;
+    this.patch({
+      pendingAttachments: this.state.pendingAttachments.filter(
+        (attachment) => attachment.clientUploadId !== clientUploadId,
+      ),
+      attachmentError: undefined,
+    });
+  };
+
   selectThread = (threadKey: string): void => {
     if (this.state.threads.some((thread) => thread.key === threadKey)) {
       this.patch({ activeThreadKey: threadKey });
@@ -198,7 +238,13 @@ export class TechnicalQaController {
 
   submit = async (): Promise<void> => {
     const question = this.state.draft.trim();
-    if (!question || this.state.submitting || this.activeRun || this.state.serviceStatus === 'unavailable') return;
+    if (
+      !question
+      || this.state.preparingAttachments
+      || this.state.submitting
+      || this.activeRun
+      || this.state.serviceStatus === 'unavailable'
+    ) return;
 
     const thread = this.activeThread();
     const clientRequestId = this.createId();
@@ -209,17 +255,35 @@ export class TechnicalQaController {
       abortController: new AbortController(),
     };
     this.activeRun = run;
-    this.patch({ submitting: true, serviceMessage: undefined });
+    const attachments = this.state.pendingAttachments;
+    this.patch({
+      submitting: true,
+      serviceMessage: undefined,
+      attachmentError: undefined,
+      uploadProgress: attachments.length > 0 ? { completed: 0, total: attachments.length } : undefined,
+    });
 
-    const request: QaQuestionRequest = {
-      schemaVersion: 1,
-      clientRequestId,
-      ...(thread.threadId ? { threadId: thread.threadId } : {}),
-      question,
-      scope: { product: 'y3_editor', editorVersion: '2.0', domain: this.state.domain },
-    };
-
+    let uploadsCompleted = attachments.length === 0;
     try {
+      const diagnosticUploadIds: string[] = [];
+      for (let index = 0; index < attachments.length; index += 1) {
+        const attachment = attachments[index]!;
+        this.setAttachmentStatus(attachment.clientUploadId, 'uploading');
+        const uploaded = await this.api.uploadDiagnostic(stripAttachmentState(attachment), run.abortController.signal);
+        if (!this.isCurrent(run)) return;
+        diagnosticUploadIds.push(uploaded.uploadId);
+        this.patch({ uploadProgress: { completed: index + 1, total: attachments.length } });
+      }
+      uploadsCompleted = true;
+
+      const request: QaQuestionRequest = {
+        schemaVersion: 1,
+        clientRequestId,
+        ...(thread.threadId ? { threadId: thread.threadId } : {}),
+        question,
+        scope: { product: 'y3_editor', editorVersion: '2.0', domain: this.state.domain },
+        ...(diagnosticUploadIds.length > 0 ? { diagnosticUploadIds } : {}),
+      };
       const accepted = await this.api.submit(request, run.abortController.signal);
       if (!this.isCurrent(run)) return;
       const turn: QaTranscriptTurn = {
@@ -227,6 +291,7 @@ export class TechnicalQaController {
         question,
         domain: request.scope.domain,
         submittedAt: accepted.acceptedAt,
+        attachments: attachments.map(toQaAttachmentSummary),
         state: {
           ...createInitialQaTurnState(),
           threadId: accepted.threadId,
@@ -241,11 +306,20 @@ export class TechnicalQaController {
         updatedAt: accepted.acceptedAt,
         turns: [...current.turns, turn],
       }));
-      this.patch({ draft: '', submitting: false });
+      this.patch({ draft: '', submitting: false, pendingAttachments: [], uploadProgress: undefined });
       await this.poll(run, accepted.threadId, accepted.turnId);
     } catch {
       if (!this.isCurrent(run)) return;
-      this.patch({ submitting: false, serviceMessage: GENERIC_SUBMIT_ERROR });
+      this.patch({
+        submitting: false,
+        serviceMessage: uploadsCompleted ? GENERIC_SUBMIT_ERROR : undefined,
+        attachmentError: uploadsCompleted ? undefined : '附件上传失败，请检查文件后重试。',
+        uploadProgress: undefined,
+        pendingAttachments: this.state.pendingAttachments.map((attachment) => ({
+          ...attachment,
+          status: uploadsCompleted ? 'pending' : 'error',
+        })),
+      });
       this.finishRun(run);
     }
   };
@@ -341,6 +415,14 @@ export class TechnicalQaController {
     }));
   }
 
+  private setAttachmentStatus(clientUploadId: string, status: PreparedQaAttachment['status']): void {
+    this.patch({
+      pendingAttachments: this.state.pendingAttachments.map((attachment) => (
+        attachment.clientUploadId === clientUploadId ? { ...attachment, status } : attachment
+      )),
+    });
+  }
+
   private updateThread(threadKey: string, update: (thread: QaThreadSession) => QaThreadSession): void {
     this.patch({
       threads: this.state.threads.map((thread) => thread.key === threadKey ? update(thread) : thread),
@@ -362,6 +444,18 @@ export class TechnicalQaController {
     this.state = { ...this.state, ...patch };
     for (const listener of this.listeners) listener();
   }
+}
+
+function stripAttachmentState(attachment: PreparedQaAttachment): QaDiagnosticUploadRequest {
+  return {
+    schemaVersion: attachment.schemaVersion,
+    clientUploadId: attachment.clientUploadId,
+    kind: attachment.kind,
+    displayName: attachment.displayName,
+    mediaType: attachment.mediaType,
+    decodedByteSize: attachment.decodedByteSize,
+    contentBase64: attachment.contentBase64,
+  };
 }
 
 export function createTechnicalQaController(

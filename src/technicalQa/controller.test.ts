@@ -24,6 +24,15 @@ function fakeApi(pages: QaEventPage[], health: QaServiceHealth = { available: tr
   let pageIndex = 0;
   return {
     health: vi.fn().mockResolvedValue(health),
+    uploadDiagnostic: vi.fn(async (request) => ({
+      schemaVersion: 1 as const,
+      uploadId: `opaque-${request.clientUploadId}`,
+      kind: request.kind,
+      displayName: request.displayName,
+      mediaType: request.mediaType,
+      decodedByteSize: request.decodedByteSize,
+      expiresAt: '2026-08-06T09:00:00.000Z',
+    })),
     submit: vi.fn(async (request) => accepted(request.clientRequestId)),
     events: vi.fn(async () => pages[Math.min(pageIndex++, pages.length - 1)]!),
     cancel: vi.fn().mockResolvedValue(undefined),
@@ -37,6 +46,91 @@ function activeTurn(controller: ReturnType<typeof createTechnicalQaController>) 
 }
 
 describe('TechnicalQaController', () => {
+  it('uploads attachments before submit and sends only opaque upload IDs with the turn', async () => {
+    const order: string[] = [];
+    const api = fakeApi([QA_CLIENT_EVENT_FIXTURES.ecaAnswer]);
+    vi.mocked(api.uploadDiagnostic).mockImplementation(async (request) => {
+      order.push(`upload:${request.displayName}`);
+      return {
+        schemaVersion: 1, uploadId: `opaque-${request.clientUploadId}`, kind: request.kind,
+        displayName: request.displayName, mediaType: request.mediaType,
+        decodedByteSize: request.decodedByteSize, expiresAt: '2026-08-06T09:00:00.000Z',
+      };
+    });
+    vi.mocked(api.submit).mockImplementation(async (request) => {
+      order.push('submit');
+      return accepted(request.clientRequestId);
+    });
+    const ids = ['thread-key', 'attachment-client', 'request-client'];
+    const controller = createTechnicalQaController(api, { sleep: immediateSleep, createId: () => ids.shift()! });
+    await controller.addAttachments([file('runtime.trace', 'text/plain', 'trace')]);
+    controller.setDraft('Diagnose this trace');
+
+    await controller.submit();
+
+    expect(order).toEqual(['upload:runtime.trace', 'submit']);
+    expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({
+      diagnosticUploadIds: ['opaque-attachment-client'],
+    }), expect.any(AbortSignal));
+    expect(activeTurn(controller).attachments).toEqual([
+      { kind: 'trace', displayName: 'runtime.trace', decodedByteSize: 5 },
+    ]);
+    expect(controller.getSnapshot().pendingAttachments).toEqual([]);
+    expect(JSON.stringify(vi.mocked(api.submit).mock.calls)).not.toMatch(/contentBase64|localPath|filePath/i);
+  });
+
+  it('keeps the draft and all removable pending items when a later upload fails', async () => {
+    const api = fakeApi([]);
+    vi.mocked(api.uploadDiagnostic)
+      .mockResolvedValueOnce({
+        schemaVersion: 1, uploadId: 'opaque-first', kind: 'log', displayName: 'game.log',
+        mediaType: 'text/plain', decodedByteSize: 3, expiresAt: '2026-08-06T09:00:00.000Z',
+      })
+      .mockRejectedValueOnce(new Error('C:\\private\\upload-store'));
+    const ids = ['thread-key', 'attachment-first', 'attachment-second', 'request-client'];
+    const controller = createTechnicalQaController(api, { createId: () => ids.shift()! });
+    await controller.addAttachments([
+      file('game.log', 'text/plain', 'log'),
+      file('runtime.trace', 'text/plain', 'trace'),
+    ]);
+    controller.setDraft('Diagnose this log');
+
+    await controller.submit();
+
+    expect(api.submit).not.toHaveBeenCalled();
+    expect(controller.getSnapshot()).toMatchObject({
+      draft: 'Diagnose this log',
+      attachmentError: '附件上传失败，请检查文件后重试。',
+      pendingAttachments: [
+        { clientUploadId: 'attachment-first', status: 'error' },
+        { clientUploadId: 'attachment-second', status: 'error' },
+      ],
+    });
+    expect(JSON.stringify(controller.getSnapshot())).not.toContain('upload-store');
+    controller.removeAttachment('attachment-first');
+    expect(controller.getSnapshot().pendingAttachments).toHaveLength(1);
+    controller.removeAttachment('attachment-second');
+    expect(controller.getSnapshot().pendingAttachments).toHaveLength(0);
+  });
+
+  it('reports a submit failure separately after uploads complete and keeps attachments retryable', async () => {
+    const api = fakeApi([]);
+    vi.mocked(api.submit).mockRejectedValue(new Error('private turn failure'));
+    const ids = ['thread-key', 'attachment-client', 'request-client'];
+    const controller = createTechnicalQaController(api, { createId: () => ids.shift()! });
+    await controller.addAttachments([file('game.log', 'text/plain', 'log')]);
+    controller.setDraft('Diagnose this log');
+
+    await controller.submit();
+
+    expect(controller.getSnapshot()).toMatchObject({
+      draft: 'Diagnose this log',
+      serviceMessage: 'The question could not be submitted. Please try again.',
+      attachmentError: undefined,
+      pendingAttachments: [{ clientUploadId: 'attachment-client', status: 'pending' }],
+    });
+  });
+
   it('polls with strict cursors and preserves incremental answer state', async () => {
     const complete = QA_CLIENT_EVENT_FIXTURES.ecaAnswer;
     const firstPage: QaEventPage = {
@@ -279,3 +373,11 @@ describe('TechnicalQaController', () => {
     expect(api.events).not.toHaveBeenCalled();
   });
 });
+
+function file(name: string, type: string, content: string): File {
+  const bytes = new TextEncoder().encode(content);
+  return {
+    name, type, size: bytes.byteLength,
+    arrayBuffer: vi.fn(async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)),
+  } as unknown as File;
+}

@@ -2,7 +2,7 @@
 import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { QaThreadSession, TechnicalQaController, TechnicalQaState } from './controller';
+import type { QaThreadSession, QaTranscriptTurn, TechnicalQaController, TechnicalQaState } from './controller';
 import { createInitialQaTurnState, type QaTurnState } from './reducer';
 import { TechnicalQaWorkspaceView } from './TechnicalQaWorkspace';
 import type { QaDomain, QaTerminalOutcome } from './types';
@@ -31,6 +31,8 @@ vi.mock('antd', () => ({
 
 vi.mock('@ant-design/icons', () => ({
   BookOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'book'),
+  DeleteOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'delete'),
+  PaperClipOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'clip'),
   PlusOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'plus'),
   ReloadOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'reload'),
   SendOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'send'),
@@ -40,6 +42,37 @@ vi.mock('@ant-design/icons', () => ({
 afterEach(() => cleanup());
 
 describe('TechnicalQaWorkspaceView', () => {
+  it('offers accessible file selection, removable pending items, and upload progress', () => {
+    const controller = controllerDouble();
+    const state = stateWith([]);
+    state.pendingAttachments = [{
+      schemaVersion: 1, clientUploadId: 'client-upload-1', kind: 'trace', displayName: 'runtime.trace',
+      mediaType: 'text/plain', decodedByteSize: 2048, contentBase64: 'dHJhY2U=', status: 'pending',
+    }];
+    state.uploadProgress = { completed: 0, total: 1 };
+    renderWorkspace(state, controller);
+
+    const input = screen.getByLabelText('选择诊断附件');
+    const selected = new File(['log'], 'game.log', { type: 'text/plain' });
+    fireEvent.change(input, { target: { files: [selected] } });
+    expect(controller.addAttachments).toHaveBeenCalledWith([selected]);
+    expect(screen.getByRole('list', { name: '待发送诊断附件' })).toBeTruthy();
+    expect(screen.getByText('runtime.trace')).toBeTruthy();
+    expect(screen.getByText('正在上传 0/1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '移除 runtime.trace' }));
+    expect(controller.removeAttachment).toHaveBeenCalledWith('client-upload-1');
+  });
+
+  it('shows compact attachment metadata on a submitted turn', () => {
+    const submittedTurn = turn('q-attachment', turnState('loading'));
+    submittedTurn.attachments = [{ kind: 'screenshot', displayName: 'capture.png', decodedByteSize: 1024 }];
+    renderWorkspace(stateWith([thread('thread-1', [submittedTurn])]));
+
+    expect(screen.getByRole('list', { name: '本次提问的诊断附件' })).toBeTruthy();
+    expect(screen.getByText('capture.png')).toBeTruthy();
+    expect(screen.getByText('1 KiB')).toBeTruthy();
+  });
+
   it('renders fixed scope controls, keeps multiline input editable, and submits with Ctrl+Enter', () => {
     const controller = controllerDouble();
     const state = stateWith([]);
@@ -162,6 +195,8 @@ function stateWith(threads: QaThreadSession[]): TechnicalQaState {
     domain: 'eca_editor',
     serviceStatus: 'ready',
     submitting: false,
+    preparingAttachments: false,
+    pendingAttachments: [],
   };
 }
 
@@ -176,7 +211,7 @@ function thread(key: string, turns: QaThreadSession['turns'], title = turns[0]?.
   };
 }
 
-function turn(clientRequestId: string, state: QaTurnState, domain: QaDomain = 'eca_editor') {
+function turn(clientRequestId: string, state: QaTurnState, domain: QaDomain = 'eca_editor'): QaTranscriptTurn {
   return {
     clientRequestId,
     question: `问题 ${clientRequestId}`,
@@ -210,5 +245,7 @@ function controllerDouble(): TechnicalQaController {
     startNewThread: vi.fn(),
     cancelActiveTurn: vi.fn().mockResolvedValue(undefined),
     refreshHealth: vi.fn().mockResolvedValue(undefined),
+    addAttachments: vi.fn().mockResolvedValue(undefined),
+    removeAttachment: vi.fn(),
   } as unknown as TechnicalQaController;
 }

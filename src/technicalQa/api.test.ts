@@ -7,6 +7,7 @@ import {
   fetchTechnicalQaThread,
   submitTechnicalQaQuestion,
   TechnicalQaApiError,
+  uploadTechnicalQaDiagnostic,
 } from './api';
 import type { QaQuestionRequest } from './types';
 
@@ -35,6 +36,36 @@ afterEach(() => {
 });
 
 describe('Technical QA browser transport', () => {
+  it('uploads diagnostic bytes as a strict JSON body with no local path authority', async () => {
+    const accepted = {
+      schemaVersion: 1 as const,
+      uploadId: 'upload-opaque-1',
+      kind: 'log' as const,
+      displayName: 'game.log',
+      mediaType: 'text/plain',
+      decodedByteSize: 3,
+      expiresAt: '2026-08-06T09:00:00.000Z',
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(accepted, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    globalWithWindow.window = testWindow();
+
+    await expect(uploadTechnicalQaDiagnostic({
+      schemaVersion: 1,
+      clientUploadId: 'client-upload-1',
+      kind: 'log',
+      displayName: 'game.log',
+      mediaType: 'text/plain',
+      decodedByteSize: 3,
+      contentBase64: 'YWJj',
+    })).resolves.toEqual(accepted);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/qa/diagnostic-uploads');
+    expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({ contentBase64: 'YWJj' }));
+    expect(String(init.body)).not.toMatch(/(?:file|project|storage)?path|provider|model|url|credential/i);
+  });
+
   it('uses only X-QA-Session for health and preserves unavailable health as state', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ schemaVersion: 1, ready: false }, 503));
     vi.stubGlobal('fetch', fetchMock);
@@ -141,6 +172,29 @@ describe('Technical QA Electron transport', () => {
       code: 'service_unavailable',
       message: 'Technical QA service is currently unavailable.',
     });
+  });
+
+  it('reuses the generic JSON bridge for diagnostic content without sending a local path', async () => {
+    const technicalQaRequest = vi.fn<NonNullable<ElectronAPI['technicalQaRequest']>>()
+      .mockResolvedValue({ success: true, status: 201, payload: {
+        schemaVersion: 1, uploadId: 'opaque', kind: 'trace', displayName: 'runtime.trace',
+        mediaType: 'text/plain', decodedByteSize: 3, expiresAt: '2026-08-06T09:00:00.000Z',
+      } });
+    globalWithWindow.window = testWindow({ technicalQaRequest });
+
+    await uploadTechnicalQaDiagnostic({
+      schemaVersion: 1, clientUploadId: 'client-1', kind: 'trace', displayName: 'runtime.trace',
+      mediaType: 'text/plain', decodedByteSize: 3, contentBase64: 'YWJj',
+    });
+
+    expect(technicalQaRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/api/qa/diagnostic-uploads',
+      method: 'POST',
+      body: expect.objectContaining({ contentBase64: 'YWJj' }),
+      sessionId,
+    }));
+    const bridgeBody = technicalQaRequest.mock.calls[0]?.[0].body;
+    expect(JSON.stringify(bridgeBody)).not.toMatch(/(?:file|project|storage)?path/i);
   });
 });
 

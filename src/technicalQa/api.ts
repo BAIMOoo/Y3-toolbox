@@ -5,6 +5,8 @@ import type {
 } from './controller';
 import {
   buildQaEventPath,
+  type QaDiagnosticUploadAccepted,
+  type QaDiagnosticUploadRequest,
   type QaEventPage,
   type QaEventRequest,
   type QaPublicErrorCode,
@@ -101,6 +103,13 @@ export function submitTechnicalQaQuestion(
   return requestJson('/api/qa/turns', { method: 'POST', body: request, signal });
 }
 
+export function uploadTechnicalQaDiagnostic(
+  request: QaDiagnosticUploadRequest,
+  signal?: AbortSignal,
+): Promise<QaDiagnosticUploadAccepted> {
+  return requestJson('/api/qa/diagnostic-uploads', { method: 'POST', body: request, signal });
+}
+
 export function fetchTechnicalQaThread(threadId: string, signal?: AbortSignal): Promise<QaThreadResponse> {
   return requestJson(`/api/qa/threads/${encodeURIComponent(threadId)}`, { signal });
 }
@@ -116,6 +125,7 @@ export function cancelTechnicalQaTurn(request: QaCancelRequest, signal?: AbortSi
 
 export const technicalQaApi: QaControllerApi = {
   health: fetchTechnicalQaHealth,
+  uploadDiagnostic: uploadTechnicalQaDiagnostic,
   submit: submitTechnicalQaQuestion,
   events: fetchTechnicalQaEvents,
   async cancel(request, signal) {

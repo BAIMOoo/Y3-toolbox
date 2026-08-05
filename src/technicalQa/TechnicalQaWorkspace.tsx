@@ -1,12 +1,15 @@
 ﻿import {
   BookOutlined,
+  DeleteOutlined,
+  PaperClipOutlined,
   PlusOutlined,
   ReloadOutlined,
   SendOutlined,
   StopOutlined,
 } from '@ant-design/icons';
 import { Button, Segmented, Tag, Tooltip } from 'antd';
-import type { KeyboardEvent } from 'react';
+import { useRef, type ChangeEvent, type KeyboardEvent } from 'react';
+import { QA_ATTACHMENT_ACCEPT } from './attachments';
 import { technicalQaApi } from './api';
 import type {
   QaThreadSession,
@@ -59,15 +62,21 @@ export function TechnicalQaWorkspace() {
 }
 
 export function TechnicalQaWorkspaceView({ state, controller }: TechnicalQaWorkspaceViewProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeThread = state.threads.find((thread) => thread.key === state.activeThreadKey) ?? state.threads[0];
   const activeTurnInfo = findActiveTurn(state.threads);
   const hasActiveTurn = Boolean(activeTurnInfo);
   const submitDisabled = !state.draft.trim()
+    || state.preparingAttachments
     || state.submitting
     || hasActiveTurn
     || state.serviceStatus !== 'ready';
   const disabledReason = getSubmitDisabledReason(state, hasActiveTurn);
   const runtimeMessage = getRuntimeMessage(state, activeTurnInfo);
+  const attachmentBusy = state.preparingAttachments
+    || state.submitting
+    || hasActiveTurn
+    || state.serviceStatus !== 'ready';
 
   const submit = () => {
     if (!submitDisabled) void controller.submit();
@@ -77,6 +86,12 @@ export function TechnicalQaWorkspaceView({ state, controller }: TechnicalQaWorks
     if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey)) return;
     event.preventDefault();
     submit();
+  };
+
+  const handleFilesSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    void controller.addAttachments(files);
   };
 
   return (
@@ -171,6 +186,58 @@ export function TechnicalQaWorkspaceView({ state, controller }: TechnicalQaWorks
               />
               <span className="technical-qa__scope-note">固定范围：Y3 Editor 2.0</span>
             </div>
+            <div className="technical-qa__attachment-toolbar">
+              <input
+                ref={fileInputRef}
+                className="technical-qa__file-input"
+                type="file"
+                multiple
+                accept={QA_ATTACHMENT_ACCEPT}
+                aria-label="选择诊断附件"
+                onChange={handleFilesSelected}
+              />
+              <Tooltip title="添加日志、Trace 或截图">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<PaperClipOutlined />}
+                  aria-label="添加诊断附件"
+                  disabled={attachmentBusy || state.pendingAttachments.length >= 5}
+                  onClick={() => fileInputRef.current?.click()}
+                />
+              </Tooltip>
+              <span>日志、Trace、PNG/JPEG/WebP，最多 5 个</span>
+              {state.preparingAttachments && <span role="status">正在读取附件</span>}
+              {state.uploadProgress && (
+                <span role="status" aria-live="polite">
+                  正在上传 {state.uploadProgress.completed}/{state.uploadProgress.total}
+                </span>
+              )}
+            </div>
+            {state.pendingAttachments.length > 0 && (
+              <ul className="technical-qa__attachment-list" aria-label="待发送诊断附件">
+                {state.pendingAttachments.map((attachment) => (
+                  <li key={attachment.clientUploadId}>
+                    <span className="technical-qa__attachment-kind">{getAttachmentKindLabel(attachment.kind)}</span>
+                    <span className="technical-qa__attachment-name">{attachment.displayName}</span>
+                    <span>{formatBytes(attachment.decodedByteSize)}</span>
+                    <Tooltip title={`移除 ${attachment.displayName}`}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        aria-label={`移除 ${attachment.displayName}`}
+                        disabled={state.submitting || hasActiveTurn}
+                        onClick={() => controller.removeAttachment(attachment.clientUploadId)}
+                      />
+                    </Tooltip>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {state.attachmentError && (
+              <div className="technical-qa__attachment-error" role="alert">{state.attachmentError}</div>
+            )}
             <div className="technical-qa__composer-row">
               <textarea
                 value={state.draft}
@@ -272,6 +339,7 @@ function TranscriptTurn({
 }) {
   const evidenceState = getEvidenceState(turn.state.outcome);
   const retryableError = turn.state.outcome?.kind === 'error' && turn.state.outcome.retryable;
+  const attachments = turn.attachments ?? [];
 
   return (
     <article className="technical-qa__turn" aria-label={`问题：${turn.question}`}>
@@ -282,6 +350,17 @@ function TranscriptTurn({
           <time dateTime={turn.submittedAt}>{formatTime(turn.submittedAt)}</time>
         </div>
         <p>{turn.question}</p>
+        {attachments.length > 0 && (
+          <ul className="technical-qa__turn-attachments" aria-label="本次提问的诊断附件">
+            {attachments.map((attachment, index) => (
+              <li key={`${attachment.displayName}-${index}`}>
+                <span>{getAttachmentKindLabel(attachment.kind)}</span>
+                <span>{attachment.displayName}</span>
+                <span>{formatBytes(attachment.decodedByteSize)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       <div className={`technical-qa__response technical-qa__response--${turn.state.status}`}>
         <div className="technical-qa__turn-meta">
@@ -425,6 +504,7 @@ function getTurnStatusLabel(turn: QaTranscriptTurn): string {
 function getSubmitDisabledReason(state: TechnicalQaState, hasActiveTurn: boolean): string {
   if (state.serviceStatus === 'checking') return '正在检查服务状态';
   if (state.serviceStatus === 'unavailable') return '服务不可用';
+  if (state.preparingAttachments) return '正在读取附件';
   if (state.submitting || hasActiveTurn) return '当前有回答正在生成，完成后可继续提问';
   if (!state.draft.trim()) return '输入问题后再提问';
   return '';
@@ -446,4 +526,16 @@ function formatTime(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function getAttachmentKindLabel(kind: 'log' | 'trace' | 'screenshot'): string {
+  if (kind === 'trace') return 'Trace';
+  if (kind === 'screenshot') return '截图';
+  return '日志';
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }

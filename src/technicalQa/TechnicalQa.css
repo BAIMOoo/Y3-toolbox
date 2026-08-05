@@ -417,6 +417,90 @@
   margin: 0 auto 8px;
 }
 
+.technical-qa__attachment-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 900px);
+  min-height: 28px;
+  margin: 0 auto 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.technical-qa__attachment-toolbar > span:last-child {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.technical-qa__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.technical-qa__attachment-list,
+.technical-qa__turn-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.technical-qa__attachment-list {
+  width: min(100%, 900px);
+  margin: 0 auto 8px;
+}
+
+.technical-qa__attachment-list li,
+.technical-qa__turn-attachments li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 2px 4px 2px 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+}
+
+.technical-qa__attachment-kind,
+.technical-qa__turn-attachments li > span:first-child {
+  color: var(--accent-blue-strong);
+  font-weight: 650;
+}
+
+.technical-qa__attachment-name {
+  max-width: min(40vw, 320px);
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.technical-qa__attachment-error {
+  width: min(100%, 900px);
+  margin: 0 auto 8px;
+  color: var(--color-delete);
+  font-size: 12px;
+}
+
+.technical-qa__turn-attachments {
+  margin-top: 9px;
+}
+
+.technical-qa__turn-attachments li {
+  padding: 4px 8px;
+}
+
 .technical-qa__scope-note {
   color: var(--text-muted);
   font-family: var(--font-mono);

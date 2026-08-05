@@ -14,6 +14,19 @@ describe('technical QA public wire contract', () => {
     expect(JSON.stringify(request)).not.toMatch(/provider|model|endpoint|token|projectPath|ownerToken/i);
   });
 
+  it('permits only opaque diagnostic upload IDs on a question request', () => {
+    const request: QaQuestionRequest = {
+      schemaVersion: 1,
+      clientRequestId: 'request-1',
+      question: 'Diagnose this explicit evidence.',
+      scope: { product: 'y3_editor', editorVersion: '2.0', domain: 'eca_editor' },
+      diagnosticUploadIds: ['upload_opaque_1'],
+    };
+
+    expect(request.diagnosticUploadIds).toEqual(['upload_opaque_1']);
+    expect(JSON.stringify(request)).not.toMatch(/(?:file|project|storage)?path|contentBase64|provider|model|url/i);
+  });
+
   it('makes citations non-empty for answer outcomes at compile-time and runtime', () => {
     const outcome: QaTerminalOutcome = {
       kind: 'answer',
