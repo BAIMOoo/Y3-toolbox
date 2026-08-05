@@ -1,0 +1,372 @@
+import { createInitialQaTurnState, reduceQaEventPage, type QaTurnState } from './reducer';
+import type {
+  QaDomain,
+  QaEventPage,
+  QaEventRequest,
+  QaPublicErrorCode,
+  QaQuestionAccepted,
+  QaQuestionRequest,
+} from './types';
+
+export type QaServiceStatus = 'checking' | 'ready' | 'unavailable';
+
+export interface QaServiceHealth {
+  available: boolean;
+  message?: string;
+}
+
+export interface QaCancelRequest {
+  schemaVersion: 1;
+  threadId: string;
+  turnId: string;
+}
+
+export interface QaControllerApi {
+  health(signal?: AbortSignal): Promise<QaServiceHealth>;
+  submit(request: QaQuestionRequest, signal?: AbortSignal): Promise<QaQuestionAccepted>;
+  events(request: QaEventRequest, signal?: AbortSignal): Promise<QaEventPage>;
+  cancel(request: QaCancelRequest, signal?: AbortSignal): Promise<void>;
+}
+
+export interface QaTranscriptTurn {
+  clientRequestId: string;
+  question: string;
+  domain: QaDomain;
+  submittedAt: string;
+  state: QaTurnState;
+}
+
+export interface QaThreadSession {
+  key: string;
+  threadId?: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  turns: QaTranscriptTurn[];
+}
+
+export interface TechnicalQaState {
+  threads: QaThreadSession[];
+  activeThreadKey: string;
+  draft: string;
+  domain: QaDomain;
+  serviceStatus: QaServiceStatus;
+  serviceMessage?: string;
+  submitting: boolean;
+}
+
+export interface TechnicalQaControllerOptions {
+  pollIntervalMs?: number;
+  maxPollAttempts?: number;
+  maxConsecutivePollFailures?: number;
+  createId?: () => string;
+  now?: () => string;
+  sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+}
+
+type Listener = () => void;
+
+interface ActiveRun {
+  id: number;
+  threadKey: string;
+  clientRequestId: string;
+  abortController: AbortController;
+}
+
+const DEFAULT_POLL_INTERVAL_MS = 750;
+const DEFAULT_MAX_POLL_ATTEMPTS = 240;
+const DEFAULT_MAX_POLL_FAILURES = 3;
+const GENERIC_UNAVAILABLE_MESSAGE = 'Technical QA service is currently unavailable.';
+const GENERIC_SUBMIT_ERROR = 'The question could not be submitted. Please try again.';
+const GENERIC_POLL_ERROR = 'The answer stream could not be completed. Please try again.';
+
+function defaultCreateId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `qa-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function defaultSleep(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = globalThis.setTimeout(resolve, milliseconds);
+    signal.addEventListener('abort', () => {
+      globalThis.clearTimeout(timer);
+      reject(signal.reason);
+    }, { once: true });
+  });
+}
+
+function createThread(key: string, now: string): QaThreadSession {
+  return { key, title: 'New question', createdAt: now, updatedAt: now, turns: [] };
+}
+
+function terminalError(state: QaTurnState, code: QaPublicErrorCode, message: string): QaTurnState {
+  return {
+    ...state,
+    status: 'error',
+    terminal: true,
+    outcome: { kind: 'error', code, message, retryable: true },
+  };
+}
+
+export class TechnicalQaController {
+  private readonly api: QaControllerApi;
+  private readonly listeners = new Set<Listener>();
+  private readonly pollIntervalMs: number;
+  private readonly maxPollAttempts: number;
+  private readonly maxConsecutivePollFailures: number;
+  private readonly createId: () => string;
+  private readonly now: () => string;
+  private readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  private state: TechnicalQaState;
+  private activeRun?: ActiveRun;
+  private runSequence = 0;
+  private initialized = false;
+  private disposed = false;
+
+  constructor(api: QaControllerApi, options: TechnicalQaControllerOptions = {}) {
+    this.api = api;
+    this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.maxPollAttempts = options.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
+    this.maxConsecutivePollFailures = options.maxConsecutivePollFailures ?? DEFAULT_MAX_POLL_FAILURES;
+    this.createId = options.createId ?? defaultCreateId;
+    this.now = options.now ?? (() => new Date().toISOString());
+    this.sleep = options.sleep ?? defaultSleep;
+    const thread = createThread(this.createId(), this.now());
+    this.state = {
+      threads: [thread],
+      activeThreadKey: thread.key,
+      draft: '',
+      domain: 'eca_editor',
+      serviceStatus: 'checking',
+      submitting: false,
+    };
+  }
+
+  getSnapshot = (): TechnicalQaState => this.state;
+
+  subscribe = (listener: Listener): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  initialize = async (): Promise<void> => {
+    if (this.initialized || this.disposed) return;
+    this.initialized = true;
+    await this.refreshHealth();
+  };
+
+  refreshHealth = async (): Promise<void> => {
+    if (this.disposed) return;
+    this.patch({ serviceStatus: 'checking', serviceMessage: undefined });
+    try {
+      const health = await this.api.health();
+      if (this.disposed) return;
+      this.patch({
+        serviceStatus: health.available ? 'ready' : 'unavailable',
+        serviceMessage: health.available ? undefined : health.message || GENERIC_UNAVAILABLE_MESSAGE,
+      });
+    } catch {
+      if (!this.disposed) {
+        this.patch({ serviceStatus: 'unavailable', serviceMessage: GENERIC_UNAVAILABLE_MESSAGE });
+      }
+    }
+  };
+
+  setDraft = (draft: string): void => this.patch({ draft });
+
+  setDomain = (domain: QaDomain): void => this.patch({ domain });
+
+  selectThread = (threadKey: string): void => {
+    if (this.state.threads.some((thread) => thread.key === threadKey)) {
+      this.patch({ activeThreadKey: threadKey });
+    }
+  };
+
+  startNewThread = (): string => {
+    const existingEmpty = this.state.threads.find((thread) => thread.turns.length === 0);
+    if (existingEmpty) {
+      this.patch({ activeThreadKey: existingEmpty.key, draft: '' });
+      return existingEmpty.key;
+    }
+    const thread = createThread(this.createId(), this.now());
+    this.patch({ threads: [thread, ...this.state.threads], activeThreadKey: thread.key, draft: '' });
+    return thread.key;
+  };
+
+  submit = async (): Promise<void> => {
+    const question = this.state.draft.trim();
+    if (!question || this.state.submitting || this.activeRun || this.state.serviceStatus === 'unavailable') return;
+
+    const thread = this.activeThread();
+    const clientRequestId = this.createId();
+    const run: ActiveRun = {
+      id: ++this.runSequence,
+      threadKey: thread.key,
+      clientRequestId,
+      abortController: new AbortController(),
+    };
+    this.activeRun = run;
+    this.patch({ submitting: true, serviceMessage: undefined });
+
+    const request: QaQuestionRequest = {
+      schemaVersion: 1,
+      clientRequestId,
+      ...(thread.threadId ? { threadId: thread.threadId } : {}),
+      question,
+      scope: { product: 'y3_editor', editorVersion: '2.0', domain: this.state.domain },
+    };
+
+    try {
+      const accepted = await this.api.submit(request, run.abortController.signal);
+      if (!this.isCurrent(run)) return;
+      const turn: QaTranscriptTurn = {
+        clientRequestId,
+        question,
+        domain: request.scope.domain,
+        submittedAt: accepted.acceptedAt,
+        state: {
+          ...createInitialQaTurnState(),
+          threadId: accepted.threadId,
+          turnId: accepted.turnId,
+          status: 'loading',
+        },
+      };
+      this.updateThread(run.threadKey, (current) => ({
+        ...current,
+        threadId: accepted.threadId,
+        title: current.turns.length === 0 ? question : current.title,
+        updatedAt: accepted.acceptedAt,
+        turns: [...current.turns, turn],
+      }));
+      this.patch({ draft: '', submitting: false });
+      await this.poll(run, accepted.threadId, accepted.turnId);
+    } catch {
+      if (!this.isCurrent(run)) return;
+      this.patch({ submitting: false, serviceMessage: GENERIC_SUBMIT_ERROR });
+      this.finishRun(run);
+    }
+  };
+
+  cancelActiveTurn = async (): Promise<void> => {
+    const run = this.activeRun;
+    if (!run) return;
+    const turn = this.findTurn(run);
+    if (!turn?.state.threadId || !turn.state.turnId) return;
+    try {
+      await this.api.cancel({
+        schemaVersion: 1,
+        threadId: turn.state.threadId,
+        turnId: turn.state.turnId,
+      }, run.abortController.signal);
+    } catch {
+      if (this.isCurrent(run)) this.patch({ serviceMessage: 'Cancellation could not be confirmed. Please try again.' });
+    }
+  };
+
+  dispose = (): void => {
+    this.disposed = true;
+    this.activeRun?.abortController.abort();
+    this.activeRun = undefined;
+    this.listeners.clear();
+  };
+
+  private async poll(run: ActiveRun, threadId: string, turnId: string): Promise<void> {
+    let attempts = 0;
+    let consecutiveFailures = 0;
+    while (this.isCurrent(run) && attempts < this.maxPollAttempts) {
+      const turn = this.findTurn(run);
+      if (!turn || turn.state.terminal) {
+        this.finishRun(run);
+        return;
+      }
+      attempts += 1;
+      try {
+        const page = await this.api.events({
+          schemaVersion: 1,
+          threadId,
+          turnId,
+          after: turn.state.lastSequence,
+        }, run.abortController.signal);
+        if (!this.isCurrent(run)) return;
+        consecutiveFailures = 0;
+        const nextTurnState = reduceQaEventPage(turn.state, page);
+        this.updateTurn(run, nextTurnState);
+        if (nextTurnState.terminal) {
+          this.finishRun(run);
+          return;
+        }
+      } catch {
+        if (!this.isCurrent(run)) return;
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= this.maxConsecutivePollFailures) {
+          this.updateTurn(run, terminalError(turn.state, 'service_unavailable', GENERIC_POLL_ERROR));
+          this.finishRun(run);
+          return;
+        }
+      }
+      try {
+        await this.sleep(this.pollIntervalMs, run.abortController.signal);
+      } catch {
+        return;
+      }
+    }
+
+    if (this.isCurrent(run)) {
+      const turn = this.findTurn(run);
+      if (turn && !turn.state.terminal) {
+        this.updateTurn(run, terminalError(turn.state, 'request_timeout', 'The answer timed out. Please try again.'));
+      }
+      this.finishRun(run);
+    }
+  }
+
+  private activeThread(): QaThreadSession {
+    return this.state.threads.find((thread) => thread.key === this.state.activeThreadKey) ?? this.state.threads[0]!;
+  }
+
+  private findTurn(run: ActiveRun): QaTranscriptTurn | undefined {
+    return this.state.threads
+      .find((thread) => thread.key === run.threadKey)
+      ?.turns.find((turn) => turn.clientRequestId === run.clientRequestId);
+  }
+
+  private updateTurn(run: ActiveRun, state: QaTurnState): void {
+    this.updateThread(run.threadKey, (thread) => ({
+      ...thread,
+      updatedAt: this.now(),
+      turns: thread.turns.map((turn) => turn.clientRequestId === run.clientRequestId ? { ...turn, state } : turn),
+    }));
+  }
+
+  private updateThread(threadKey: string, update: (thread: QaThreadSession) => QaThreadSession): void {
+    this.patch({
+      threads: this.state.threads.map((thread) => thread.key === threadKey ? update(thread) : thread),
+    });
+  }
+
+  private isCurrent(run: ActiveRun): boolean {
+    return !this.disposed && this.activeRun?.id === run.id;
+  }
+
+  private finishRun(run: ActiveRun): void {
+    if (!this.isCurrent(run)) return;
+    this.activeRun = undefined;
+    this.patch({ submitting: false });
+  }
+
+  private patch(patch: Partial<TechnicalQaState>): void {
+    if (this.disposed) return;
+    this.state = { ...this.state, ...patch };
+    for (const listener of this.listeners) listener();
+  }
+}
+
+export function createTechnicalQaController(
+  api: QaControllerApi,
+  options?: TechnicalQaControllerOptions,
+): TechnicalQaController {
+  return new TechnicalQaController(api, options);
+}
