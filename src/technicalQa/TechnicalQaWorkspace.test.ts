@@ -1,14 +1,14 @@
-// @vitest-environment jsdom
+﻿// @vitest-environment jsdom
 import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { QaThreadSession, TechnicalQaController, TechnicalQaState } from './TechnicalQaWorkspace';
+import type { QaThreadSession, TechnicalQaController, TechnicalQaState } from './controller';
 import { createInitialQaTurnState, type QaTurnState } from './reducer';
 import { TechnicalQaWorkspaceView } from './TechnicalQaWorkspace';
 import type { QaDomain, QaTerminalOutcome } from './types';
 
 vi.mock('antd', () => ({
-  Button: ({ children, disabled, onClick, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean }) => (
+  Button: ({ children, disabled, onClick, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     React.createElement('button', { ...props, disabled, onClick }, children)
   ),
   Segmented: ({ value, options, onChange, disabled }: {
@@ -165,7 +165,7 @@ function stateWith(threads: QaThreadSession[]): TechnicalQaState {
   };
 }
 
-function thread(key: string, turns: QaThreadSession['turns'], title = turns[0]?.question ?? '新问题'): QaThreadSession {
+function thread(key: string, turns: QaThreadSession['turns'], title = turns[0]?.question ?? '新问题') : QaThreadSession {
   return {
     key,
     threadId: `server-${key}`,
