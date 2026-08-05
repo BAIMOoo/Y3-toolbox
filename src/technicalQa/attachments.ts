@@ -42,6 +42,9 @@ export async function prepareQaAttachments(
   for (const file of files) {
     const displayName = sanitizeDisplayName(file.name);
     const { kind, mediaType } = classifyFile(file, displayName);
+    if (file.size === 0) {
+      throw new QaAttachmentValidationError('附件不能为空。');
+    }
     const fingerprint = `${kind}\u0000${displayName}\u0000${mediaType}\u0000${file.size}`;
     if (fingerprints.has(fingerprint)) {
       throw new QaAttachmentValidationError(`附件“${displayName}”已添加。`);
@@ -85,16 +88,22 @@ export function toQaAttachmentSummary(attachment: PreparedQaAttachment): QaAttac
 }
 
 function sanitizeDisplayName(name: string): string {
-  if (/[/\\]/.test(name) || /^[A-Za-z]:/.test(name) || name === '.' || name === '..') {
+  if (/[/\\]/.test(name) || /^[A-Za-z]:/.test(name) || /^[a-z][a-z0-9+.-]*:/i.test(name)) {
     throw new QaAttachmentValidationError('附件名称不能包含本地路径。');
   }
-  const sanitized = Array.from(name, (character) => character.charCodeAt(0))
-    .filter((code) => code > 0x1f && code !== 0x7f)
-    .map((code) => String.fromCharCode(code))
+  const sanitized = Array.from(name)
+    .filter((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint > 0x1f && codePoint !== 0x7f;
+    })
     .join('')
-    .trim();
-  if (!sanitized) throw new QaAttachmentValidationError('附件名称无效。');
-  return sanitized.slice(0, 160);
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 160);
+  if (!sanitized || sanitized === '.' || sanitized === '..') {
+    throw new QaAttachmentValidationError('附件名称无效。');
+  }
+  return sanitized;
 }
 
 function classifyFile(file: File, displayName: string): { kind: QaDiagnosticKind; mediaType: string } {

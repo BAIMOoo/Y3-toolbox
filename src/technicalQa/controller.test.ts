@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QA_CLIENT_EVENT_FIXTURES } from './fixtures';
+import { TechnicalQaApiError } from './api';
 import {
   createTechnicalQaController,
   type QaControllerApi,
@@ -166,6 +167,88 @@ describe('TechnicalQaController', () => {
     expect(vi.mocked(api.submit).mock.calls.map(([request]) => request.diagnosticUploadIds)).toEqual([
       ['opaque-attachment-client'],
       ['opaque-attachment-client'],
+    ]);
+  });
+
+  it('aborts a pre-accept upload and keeps the draft and attachments retryable', async () => {
+    const api = fakeApi([]);
+    vi.mocked(api.uploadDiagnostic).mockImplementation((_request, signal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+    }));
+    const ids = ['thread-key', 'attachment-client', 'request-client'];
+    const controller = createTechnicalQaController(api, { createId: () => ids.shift()! });
+    await controller.addAttachments([file('game.log', 'text/plain', 'log')]);
+    controller.setDraft('Cancel this upload');
+
+    const submission = controller.submit();
+    await vi.waitFor(() => expect(api.uploadDiagnostic).toHaveBeenCalledOnce());
+    const signal = vi.mocked(api.uploadDiagnostic).mock.calls[0]?.[1];
+    await controller.cancelActiveTurn();
+    await submission;
+
+    expect(signal?.aborted).toBe(true);
+    expect(api.cancel).not.toHaveBeenCalled();
+    expect(controller.getSnapshot()).toMatchObject({
+      draft: 'Cancel this upload',
+      submitting: false,
+      attachmentError: undefined,
+      serviceMessage: undefined,
+      pendingAttachments: [{ clientUploadId: 'attachment-client', status: 'pending' }],
+    });
+  });
+
+  it('aborts a pre-accept submit while preserving its exact retry identity', async () => {
+    const api = fakeApi([QA_CLIENT_EVENT_FIXTURES.ecaAnswer]);
+    vi.mocked(api.submit)
+      .mockImplementationOnce((_request, signal) => new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }))
+      .mockImplementationOnce(async (request) => accepted(request.clientRequestId));
+    const ids = ['thread-key', 'attachment-client', 'stable-request'];
+    const controller = createTechnicalQaController(api, { sleep: immediateSleep, createId: () => ids.shift()! });
+    await controller.addAttachments([file('game.log', 'text/plain', 'log')]);
+    controller.setDraft('Cancel this submit');
+
+    const firstSubmission = controller.submit();
+    await vi.waitFor(() => expect(api.submit).toHaveBeenCalledOnce());
+    await controller.cancelActiveTurn();
+    await firstSubmission;
+    await controller.submit();
+
+    expect(api.uploadDiagnostic).toHaveBeenCalledOnce();
+    expect(vi.mocked(api.submit).mock.calls.map(([request]) => request.clientRequestId)).toEqual([
+      'stable-request',
+      'stable-request',
+    ]);
+    expect(vi.mocked(api.submit).mock.calls.map(([request]) => request.diagnosticUploadIds)).toEqual([
+      ['opaque-attachment-client'],
+      ['opaque-attachment-client'],
+    ]);
+  });
+
+  it('rotates request and upload idempotency keys after submit-stage invalid_request', async () => {
+    const api = fakeApi([QA_CLIENT_EVENT_FIXTURES.ecaAnswer]);
+    vi.mocked(api.submit)
+      .mockRejectedValueOnce(new TechnicalQaApiError('invalid_request', 400))
+      .mockImplementationOnce(async (request) => accepted(request.clientRequestId));
+    const ids = ['thread-key', 'attachment-one', 'request-one', 'attachment-two', 'request-two'];
+    const controller = createTechnicalQaController(api, { sleep: immediateSleep, createId: () => ids.shift()! });
+    await controller.addAttachments([file('game.log', 'text/plain', 'log')]);
+    controller.setDraft('Retry an expired receipt');
+
+    await controller.submit();
+    expect(controller.getSnapshot().pendingAttachments).toEqual([
+      expect.objectContaining({ clientUploadId: 'attachment-two', uploadId: undefined, status: 'pending' }),
+    ]);
+    await controller.submit();
+
+    expect(vi.mocked(api.uploadDiagnostic).mock.calls.map(([request]) => request.clientUploadId)).toEqual([
+      'attachment-one',
+      'attachment-two',
+    ]);
+    expect(vi.mocked(api.submit).mock.calls.map(([request]) => request.clientRequestId)).toEqual([
+      'request-one',
+      'request-two',
     ]);
   });
 

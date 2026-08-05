@@ -27,11 +27,20 @@ describe('Technical QA diagnostic attachment preparation', () => {
 
   it.each([
     [file('C:\\private\\game.log', 'text/plain', 'log'), '本地路径'],
+    [file('file:game.log', 'text/plain', 'log'), '本地路径'],
+    [file('  ..  ', 'text/plain', 'log'), '名称无效'],
+    [file('empty.log', 'text/plain', ''), '不能为空'],
     [file('payload.exe', 'application/octet-stream', 'binary'), '仅支持'],
     [file('huge.log', 'text/plain', new Uint8Array(QA_MAX_TEXT_ATTACHMENT_BYTES + 1)), '2 MiB'],
     [file('huge.png', 'image/png', new Uint8Array(QA_MAX_SCREENSHOT_BYTES + 1)), '8 MiB'],
   ])('rejects unsafe or oversized input without preparing a request', async (candidate, message) => {
     await expect(prepareQaAttachments([candidate], [], ids())).rejects.toThrow(message);
+  });
+
+  it('normalizes safe display whitespace without corrupting Unicode names', async () => {
+    const [prepared] = await prepareQaAttachments([file('诊断  日志.log', 'text/plain', 'log')], [], ids());
+
+    expect(prepared?.displayName).toBe('诊断 日志.log');
   });
 
   it('enforces the five-file turn limit before reading file contents', async () => {

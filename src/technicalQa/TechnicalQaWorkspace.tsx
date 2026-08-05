@@ -66,6 +66,7 @@ export function TechnicalQaWorkspaceView({ state, controller }: TechnicalQaWorks
   const activeThread = state.threads.find((thread) => thread.key === state.activeThreadKey) ?? state.threads[0];
   const activeTurnInfo = findActiveTurn(state.threads);
   const hasActiveTurn = Boolean(activeTurnInfo);
+  const hasCancelableRun = state.submitting || hasActiveTurn;
   const submitDisabled = !state.draft.trim()
     || state.preparingAttachments
     || state.submitting
@@ -252,13 +253,13 @@ export function TechnicalQaWorkspaceView({ state, controller }: TechnicalQaWorks
                 onKeyDown={handleComposerKeyDown}
               />
               <div className="technical-qa__composer-actions">
-                {hasActiveTurn ? (
+                {hasCancelableRun ? (
                   <Button
                     danger
                     icon={<StopOutlined />}
                     onClick={() => void controller.cancelActiveTurn()}
                   >
-                    取消回答
+                    {hasActiveTurn ? '取消回答' : '取消提交'}
                   </Button>
                 ) : (
                   <Tooltip title={disabledReason || '提交技术问题'}>

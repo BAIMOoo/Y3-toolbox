@@ -95,6 +95,19 @@ describe('TechnicalQaWorkspaceView', () => {
     expect(controller.setDomain).toHaveBeenCalledWith('lua_y3_lualib');
   });
 
+  it('exposes the existing Stop control while upload or submit is in flight', () => {
+    const controller = controllerDouble();
+    const state = stateWith([]);
+    state.draft = 'Pending submission';
+    state.submitting = true;
+
+    renderWorkspace(state, controller);
+    fireEvent.click(screen.getByRole('button', { name: '取消提交' }));
+
+    expect(controller.cancelActiveTurn).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: '提问' })).toBeNull();
+  });
+
   it('renders streaming and answer provenance with explicit evidence state', () => {
     const streaming = turnState('streaming');
     streaming.answerText = '正在生成的回答';

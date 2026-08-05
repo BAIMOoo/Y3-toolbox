@@ -66,6 +66,58 @@ describe('Technical QA browser transport', () => {
     expect(String(init.body)).not.toMatch(/(?:file|project|storage)?path|provider|model|url|credential/i);
   });
 
+  it.each([
+    ['mismatched metadata', { kind: 'trace' }],
+    ['invalid opaque ID', { uploadId: '../private' }],
+    ['invalid decoded size', { decodedByteSize: 0 }],
+    ['invalid expiry', { expiresAt: 'not-a-date' }],
+    ['expired receipt', { expiresAt: '2000-01-01T00:00:00.000Z' }],
+    ['unexpected fields', { storagePath: 'C:\\private\\upload.bin' }],
+  ])('rejects %s in a diagnostic upload receipt', async (_label, override) => {
+    const request = {
+      schemaVersion: 1 as const, clientUploadId: 'client-upload-1', kind: 'log' as const,
+      displayName: 'game.log', mediaType: 'text/plain', decodedByteSize: 3, contentBase64: 'YWJj',
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      schemaVersion: 1, uploadId: 'upload-opaque-1', kind: 'log', displayName: 'game.log',
+      mediaType: 'text/plain', decodedByteSize: 3, expiresAt: '2026-08-06T09:00:00.000Z',
+      ...override,
+    }, 201)));
+    globalWithWindow.window = testWindow();
+
+    await expect(uploadTechnicalQaDiagnostic(request)).rejects.toMatchObject({
+      code: 'internal_error',
+      message: 'Technical QA could not complete the request.',
+    });
+  });
+
+  it('accepts a smaller decoded size after backend text sanitization', async () => {
+    const accepted = {
+      schemaVersion: 1 as const, uploadId: 'upload-opaque-1', kind: 'log' as const, displayName: 'game.log',
+      mediaType: 'text/plain', decodedByteSize: 2, expiresAt: '2026-08-06T09:00:00.000Z',
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(accepted, 201)));
+    globalWithWindow.window = testWindow();
+
+    await expect(uploadTechnicalQaDiagnostic({
+      schemaVersion: 1, clientUploadId: 'client-upload-1', kind: 'log', displayName: 'game.log',
+      mediaType: 'text/plain', decodedByteSize: 3, contentBase64: 'YQBi',
+    })).resolves.toEqual(accepted);
+  });
+
+  it('rejects a smaller decoded size for screenshot receipts', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      schemaVersion: 1, uploadId: 'upload-opaque-1', kind: 'screenshot', displayName: 'capture.png',
+      mediaType: 'image/png', decodedByteSize: 2, expiresAt: '2026-08-06T09:00:00.000Z',
+    }, 201)));
+    globalWithWindow.window = testWindow();
+
+    await expect(uploadTechnicalQaDiagnostic({
+      schemaVersion: 1, clientUploadId: 'client-upload-1', kind: 'screenshot',
+      displayName: 'capture.png', mediaType: 'image/png', decodedByteSize: 3, contentBase64: 'YWJj',
+    })).rejects.toMatchObject({ code: 'internal_error' });
+  });
+
   it('uses only X-QA-Session for health and preserves unavailable health as state', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ schemaVersion: 1, ready: false }, 503));
     vi.stubGlobal('fetch', fetchMock);

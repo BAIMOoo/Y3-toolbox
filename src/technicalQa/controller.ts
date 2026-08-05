@@ -284,6 +284,7 @@ export class TechnicalQaController {
     });
 
     let uploadsCompleted = attachments.length === 0;
+    let submitStarted = false;
     try {
       const diagnosticUploadIds: string[] = [];
       for (let index = 0; index < attachments.length; index += 1) {
@@ -310,6 +311,7 @@ export class TechnicalQaController {
         scope: { product: 'y3_editor', editorVersion: '2.0', domain: this.state.domain },
         ...(diagnosticUploadIds.length > 0 ? { diagnosticUploadIds } : {}),
       };
+      submitStarted = true;
       const accepted = await this.api.submit(request, run.abortController.signal);
       if (!this.isCurrent(run)) return;
       this.pendingSubmitAttempt = undefined;
@@ -335,8 +337,10 @@ export class TechnicalQaController {
       }));
       this.patch({ draft: '', submitting: false, pendingAttachments: [], uploadProgress: undefined });
       await this.poll(run, accepted.threadId, accepted.turnId);
-    } catch {
+    } catch (error) {
       if (!this.isCurrent(run)) return;
+      const invalidReceipt = submitStarted && hasPublicErrorCode(error, 'invalid_request');
+      if (invalidReceipt) this.pendingSubmitAttempt = undefined;
       this.patch({
         submitting: false,
         serviceMessage: uploadsCompleted ? GENERIC_SUBMIT_ERROR : undefined,
@@ -344,7 +348,8 @@ export class TechnicalQaController {
         uploadProgress: undefined,
         pendingAttachments: this.state.pendingAttachments.map((attachment) => ({
           ...attachment,
-          status: attachment.uploadId ? 'uploaded' : uploadsCompleted ? 'pending' : 'error',
+          ...(invalidReceipt ? { clientUploadId: this.createId(), uploadId: undefined } : {}),
+          status: invalidReceipt ? 'pending' : attachment.uploadId ? 'uploaded' : uploadsCompleted ? 'pending' : 'error',
         })),
       });
       this.finishRun(run);
@@ -355,7 +360,21 @@ export class TechnicalQaController {
     const run = this.activeRun;
     if (!run) return;
     const turn = this.findTurn(run);
-    if (!turn?.state.threadId || !turn.state.turnId) return;
+    if (!turn?.state.threadId || !turn.state.turnId) {
+      run.abortController.abort();
+      this.activeRun = undefined;
+      this.patch({
+        submitting: false,
+        serviceMessage: undefined,
+        attachmentError: undefined,
+        uploadProgress: undefined,
+        pendingAttachments: this.state.pendingAttachments.map((attachment) => ({
+          ...attachment,
+          status: attachment.uploadId ? 'uploaded' : 'pending',
+        })),
+      });
+      return;
+    }
     try {
       await this.api.cancel({
         schemaVersion: 1,
@@ -479,6 +498,10 @@ export class TechnicalQaController {
     this.state = { ...this.state, ...patch };
     for (const listener of this.listeners) listener();
   }
+}
+
+function hasPublicErrorCode(error: unknown, code: QaPublicErrorCode): boolean {
+  return error !== null && typeof error === 'object' && 'code' in error && error.code === code;
 }
 
 function createSubmitFingerprint(

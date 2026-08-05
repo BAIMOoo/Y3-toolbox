@@ -107,7 +107,8 @@ export function uploadTechnicalQaDiagnostic(
   request: QaDiagnosticUploadRequest,
   signal?: AbortSignal,
 ): Promise<QaDiagnosticUploadAccepted> {
-  return requestJson('/api/qa/diagnostic-uploads', { method: 'POST', body: request, signal });
+  return requestJson<unknown>('/api/qa/diagnostic-uploads', { method: 'POST', body: request, signal })
+    .then((payload) => validateDiagnosticUploadReceipt(payload, request));
 }
 
 export function fetchTechnicalQaThread(threadId: string, signal?: AbortSignal): Promise<QaThreadResponse> {
@@ -224,6 +225,34 @@ function readPublicErrorCode(payload: unknown): QaPublicErrorCode | undefined {
   return PUBLIC_ERROR_CODES.has(payload.error.code as QaPublicErrorCode)
     ? payload.error.code as QaPublicErrorCode
     : undefined;
+}
+
+function validateDiagnosticUploadReceipt(
+  payload: unknown,
+  request: QaDiagnosticUploadRequest,
+): QaDiagnosticUploadAccepted {
+  const allowedKeys = new Set([
+    'schemaVersion', 'uploadId', 'kind', 'displayName', 'mediaType', 'decodedByteSize', 'expiresAt',
+  ]);
+  if (!isRecord(payload)
+    || Object.keys(payload).length !== allowedKeys.size
+    || Object.keys(payload).some((key) => !allowedKeys.has(key))
+    || payload.schemaVersion !== 1
+    || typeof payload.uploadId !== 'string'
+    || !SESSION_PATTERN.test(payload.uploadId)
+    || payload.kind !== request.kind
+    || payload.displayName !== request.displayName
+    || payload.mediaType !== request.mediaType
+    || !Number.isSafeInteger(payload.decodedByteSize)
+    || Number(payload.decodedByteSize) < 1
+    || Number(payload.decodedByteSize) > request.decodedByteSize
+    || (request.kind === 'screenshot' && payload.decodedByteSize !== request.decodedByteSize)
+    || typeof payload.expiresAt !== 'string'
+    || !Number.isFinite(Date.parse(payload.expiresAt))
+    || Date.parse(payload.expiresAt) <= Date.now()) {
+    throw new TechnicalQaApiError('internal_error', 500);
+  }
+  return payload as unknown as QaDiagnosticUploadAccepted;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
