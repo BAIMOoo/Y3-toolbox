@@ -190,6 +190,21 @@ describe('Technical QA browser transport', () => {
     expect(String(error)).toContain('Technical QA could not complete the request.');
     expect(String(error)).not.toMatch(/private|runtime\.jsonl|TOKEN|secret/i);
   });
+
+  it('preserves retrieval failure semantics while sanitizing backend details', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      error: {
+        code: 'retrieval_unavailable',
+        message: 'Vector store at C:\\private\\evidence.db rejected TOKEN=secret',
+      },
+    }, 503)));
+    globalWithWindow.window = testWindow();
+
+    await expect(fetchTechnicalQaThread('thread-1')).rejects.toMatchObject({
+      code: 'retrieval_unavailable',
+      message: 'Technical QA could not retrieve evidence. Please try again.',
+    });
+  });
 });
 
 describe('Technical QA Electron transport', () => {
