@@ -8,7 +8,7 @@ import { TechnicalQaWorkspaceView } from './TechnicalQaWorkspace';
 import type { QaDomain, QaTerminalOutcome } from './types';
 
 vi.mock('antd', () => ({
-  Button: ({ children, disabled, onClick, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+  Button: ({ children, disabled, onClick, loading, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean }) => (
     React.createElement('button', { ...props, disabled, onClick }, children)
   ),
   Segmented: ({ value, options, onChange, disabled }: {
@@ -47,10 +47,10 @@ describe('TechnicalQaWorkspaceView', () => {
     const { container } = renderWorkspace(state, controller);
 
     expect(screen.getByText('Y3 2.0')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'ECA / 编辑器' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'ECA / 编辑器' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.queryByText(/provider|model|project path/i)).toBeNull();
     expect(screen.getByText('服务已就绪，历史与引用会保留在当前工作区。')).toBeTruthy();
-    expect(container.querySelector('.technical-qa__transcript')).not.toHaveAttribute('aria-live');
+    expect(container.querySelector('.technical-qa__transcript')?.hasAttribute('aria-live')).toBe(false);
 
     const composer = screen.getByRole('textbox', { name: '技术问题' });
     fireEvent.keyDown(composer, { key: 'Enter' });
@@ -127,7 +127,7 @@ describe('TechnicalQaWorkspaceView', () => {
     renderWorkspace(state, controller);
 
     expect((screen.getByRole('textbox', { name: '技术问题' }) as HTMLTextAreaElement).value).toBe('保留中的草稿');
-    expect((screen.getByRole('button', { name: /提问/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '提问' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: /重新检查/ }));
     expect(controller.refreshHealth).toHaveBeenCalledOnce();
   });
