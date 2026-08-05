@@ -78,6 +78,7 @@ export type QaPublicErrorCode =
   | 'invalid_cursor'
   | 'cursor_expired'
   | 'rate_limited'
+  | 'retrieval_unavailable'
   | 'service_unavailable'
   | 'request_timeout'
   | 'internal_error';

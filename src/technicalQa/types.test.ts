@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildQaEventPath, type QaQuestionRequest, type QaTerminalOutcome } from './types';
+import {
+  buildQaEventPath,
+  type QaPublicErrorCode,
+  type QaQuestionRequest,
+  type QaTerminalOutcome,
+} from './types';
 
 describe('technical QA public wire contract', () => {
   it('freezes the Y3 2.0 request shape without provider or project fields', () => {
@@ -44,6 +49,12 @@ describe('technical QA public wire contract', () => {
     };
 
     expect(outcome.citations).toHaveLength(1);
+  });
+
+  it('includes retrieval infrastructure failure in the public error contract', () => {
+    const code: QaPublicErrorCode = 'retrieval_unavailable';
+
+    expect(code).toBe('retrieval_unavailable');
   });
 
   it('builds only the strict QA turn polling path and rejects malformed cursors', () => {
