@@ -10,7 +10,8 @@ const SCREENSHOT_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']
 const TEXT_MEDIA_TYPES = new Set(['text/plain', 'application/json']);
 
 export interface PreparedQaAttachment extends QaDiagnosticUploadRequest {
-  status: 'pending' | 'uploading' | 'error';
+  status: 'pending' | 'uploading' | 'uploaded' | 'error';
+  uploadId?: string;
 }
 
 export interface QaAttachmentSummary {

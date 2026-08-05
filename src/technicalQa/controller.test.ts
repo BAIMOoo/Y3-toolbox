@@ -80,13 +80,17 @@ describe('TechnicalQaController', () => {
   });
 
   it('keeps the draft and all removable pending items when a later upload fails', async () => {
-    const api = fakeApi([]);
+    const api = fakeApi([QA_CLIENT_EVENT_FIXTURES.ecaAnswer]);
     vi.mocked(api.uploadDiagnostic)
       .mockResolvedValueOnce({
         schemaVersion: 1, uploadId: 'opaque-first', kind: 'log', displayName: 'game.log',
         mediaType: 'text/plain', decodedByteSize: 3, expiresAt: '2026-08-06T09:00:00.000Z',
       })
-      .mockRejectedValueOnce(new Error('C:\\private\\upload-store'));
+      .mockRejectedValueOnce(new Error('C:\\private\\upload-store'))
+      .mockResolvedValueOnce({
+        schemaVersion: 1, uploadId: 'opaque-second', kind: 'trace', displayName: 'runtime.trace',
+        mediaType: 'text/plain', decodedByteSize: 5, expiresAt: '2026-08-06T09:00:00.000Z',
+      });
     const ids = ['thread-key', 'attachment-first', 'attachment-second', 'request-client'];
     const controller = createTechnicalQaController(api, { createId: () => ids.shift()! });
     await controller.addAttachments([
@@ -102,15 +106,25 @@ describe('TechnicalQaController', () => {
       draft: 'Diagnose this log',
       attachmentError: '附件上传失败，请检查文件后重试。',
       pendingAttachments: [
-        { clientUploadId: 'attachment-first', status: 'error' },
+        { clientUploadId: 'attachment-first', uploadId: 'opaque-first', status: 'uploaded' },
         { clientUploadId: 'attachment-second', status: 'error' },
       ],
     });
     expect(JSON.stringify(controller.getSnapshot())).not.toContain('upload-store');
-    controller.removeAttachment('attachment-first');
-    expect(controller.getSnapshot().pendingAttachments).toHaveLength(1);
-    controller.removeAttachment('attachment-second');
-    expect(controller.getSnapshot().pendingAttachments).toHaveLength(0);
+
+    await controller.submit();
+
+    expect(api.uploadDiagnostic).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(api.uploadDiagnostic).mock.calls.map(([upload]) => upload.clientUploadId)).toEqual([
+      'attachment-first',
+      'attachment-second',
+      'attachment-second',
+    ]);
+    expect(vi.mocked(api.submit).mock.calls.map(([request]) => request.clientRequestId)).toEqual(['request-client']);
+    expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({
+      diagnosticUploadIds: ['opaque-first', 'opaque-second'],
+    }), expect.any(AbortSignal));
+    expect(controller.getSnapshot().pendingAttachments).toEqual([]);
   });
 
   it('reports a submit failure separately after uploads complete and keeps attachments retryable', async () => {
@@ -127,8 +141,85 @@ describe('TechnicalQaController', () => {
       draft: 'Diagnose this log',
       serviceMessage: 'The question could not be submitted. Please try again.',
       attachmentError: undefined,
-      pendingAttachments: [{ clientUploadId: 'attachment-client', status: 'pending' }],
+      pendingAttachments: [{ clientUploadId: 'attachment-client', uploadId: 'opaque-attachment-client', status: 'uploaded' }],
     });
+  });
+
+  it('reuses request and upload IDs after an ambiguous response loss', async () => {
+    const api = fakeApi([QA_CLIENT_EVENT_FIXTURES.ecaAnswer]);
+    vi.mocked(api.submit)
+      .mockRejectedValueOnce(new TypeError('network response lost'))
+      .mockImplementationOnce(async (request) => accepted(request.clientRequestId));
+    const ids = ['thread-key', 'attachment-client', 'stable-request'];
+    const controller = createTechnicalQaController(api, { sleep: immediateSleep, createId: () => ids.shift()! });
+    await controller.addAttachments([file('game.log', 'text/plain', 'log')]);
+    controller.setDraft('Diagnose response loss');
+
+    await controller.submit();
+    await controller.submit();
+
+    expect(api.uploadDiagnostic).toHaveBeenCalledOnce();
+    expect(vi.mocked(api.submit).mock.calls.map(([request]) => request.clientRequestId)).toEqual([
+      'stable-request',
+      'stable-request',
+    ]);
+    expect(vi.mocked(api.submit).mock.calls.map(([request]) => request.diagnosticUploadIds)).toEqual([
+      ['opaque-attachment-client'],
+      ['opaque-attachment-client'],
+    ]);
+  });
+
+  it('creates a new request ID when draft, domain, thread, or attachment inputs change', async () => {
+    const api = fakeApi([QA_CLIENT_EVENT_FIXTURES.ecaAnswer]);
+    vi.mocked(api.submit)
+      .mockRejectedValueOnce(new TypeError('response unavailable'))
+      .mockRejectedValueOnce(new TypeError('response unavailable'))
+      .mockImplementationOnce(async (request) => accepted(request.clientRequestId))
+      .mockRejectedValue(new TypeError('response unavailable'));
+    const ids = [
+      'thread-one',
+      'attachment-one',
+      'request-one',
+      'request-draft',
+      'request-domain',
+      'thread-two',
+      'request-thread',
+      'attachment-two',
+      'request-attachments',
+    ];
+    const controller = createTechnicalQaController(api, { createId: () => ids.shift()! });
+    await controller.addAttachments([file('game.log', 'text/plain', 'log')]);
+    controller.setDraft('Question one');
+    await controller.submit();
+
+    controller.setDraft('Question two');
+    await controller.submit();
+    controller.setDomain('lua_y3_lualib');
+    await controller.submit();
+    controller.startNewThread();
+    controller.setDraft('Question on another thread');
+    await controller.submit();
+    await controller.addAttachments([file('runtime.trace', 'text/plain', 'trace')]);
+    await controller.submit();
+
+    expect(vi.mocked(api.submit).mock.calls.map(([request]) => request.clientRequestId)).toEqual([
+      'request-one',
+      'request-draft',
+      'request-domain',
+      'request-thread',
+      'request-attachments',
+    ]);
+    expect(vi.mocked(api.uploadDiagnostic).mock.calls.map(([upload]) => upload.clientUploadId)).toEqual([
+      'attachment-one',
+      'attachment-two',
+    ]);
+    expect(vi.mocked(api.submit).mock.calls.map(([request]) => request.diagnosticUploadIds)).toEqual([
+      ['opaque-attachment-one'],
+      ['opaque-attachment-one'],
+      ['opaque-attachment-one'],
+      undefined,
+      ['opaque-attachment-two'],
+    ]);
   });
 
   it('polls with strict cursors and preserves incremental answer state', async () => {

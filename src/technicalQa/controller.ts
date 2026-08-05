@@ -87,6 +87,11 @@ interface ActiveRun {
   abortController: AbortController;
 }
 
+interface PendingSubmitAttempt {
+  fingerprint: string;
+  clientRequestId: string;
+}
+
 const DEFAULT_POLL_INTERVAL_MS = 750;
 const DEFAULT_MAX_POLL_ATTEMPTS = 240;
 const DEFAULT_MAX_POLL_FAILURES = 3;
@@ -136,6 +141,7 @@ export class TechnicalQaController {
   private readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   private state: TechnicalQaState;
   private activeRun?: ActiveRun;
+  private pendingSubmitAttempt?: PendingSubmitAttempt;
   private runSequence = 0;
   private initialized = false;
   private disposed = false;
@@ -191,12 +197,19 @@ export class TechnicalQaController {
     }
   };
 
-  setDraft = (draft: string): void => this.patch({ draft });
+  setDraft = (draft: string): void => {
+    if (draft !== this.state.draft) this.pendingSubmitAttempt = undefined;
+    this.patch({ draft });
+  };
 
-  setDomain = (domain: QaDomain): void => this.patch({ domain });
+  setDomain = (domain: QaDomain): void => {
+    if (domain !== this.state.domain) this.pendingSubmitAttempt = undefined;
+    this.patch({ domain });
+  };
 
   addAttachments = async (files: readonly File[]): Promise<void> => {
     if (files.length === 0 || this.state.preparingAttachments || this.state.submitting || this.activeRun) return;
+    this.pendingSubmitAttempt = undefined;
     this.patch({ attachmentError: undefined, preparingAttachments: true });
     try {
       const prepared = await prepareQaAttachments(files, this.state.pendingAttachments, this.createId);
@@ -211,6 +224,7 @@ export class TechnicalQaController {
 
   removeAttachment = (clientUploadId: string): void => {
     if (this.state.preparingAttachments || this.state.submitting || this.activeRun) return;
+    this.pendingSubmitAttempt = undefined;
     this.patch({
       pendingAttachments: this.state.pendingAttachments.filter(
         (attachment) => attachment.clientUploadId !== clientUploadId,
@@ -221,11 +235,13 @@ export class TechnicalQaController {
 
   selectThread = (threadKey: string): void => {
     if (this.state.threads.some((thread) => thread.key === threadKey)) {
+      if (threadKey !== this.state.activeThreadKey) this.pendingSubmitAttempt = undefined;
       this.patch({ activeThreadKey: threadKey });
     }
   };
 
   startNewThread = (): string => {
+    this.pendingSubmitAttempt = undefined;
     const existingEmpty = this.state.threads.find((thread) => thread.turns.length === 0);
     if (existingEmpty) {
       this.patch({ activeThreadKey: existingEmpty.key, draft: '' });
@@ -247,7 +263,11 @@ export class TechnicalQaController {
     ) return;
 
     const thread = this.activeThread();
-    const clientRequestId = this.createId();
+    const fingerprint = createSubmitFingerprint(thread, question, this.state.domain, this.state.pendingAttachments);
+    const clientRequestId = this.pendingSubmitAttempt?.fingerprint === fingerprint
+      ? this.pendingSubmitAttempt.clientRequestId
+      : this.createId();
+    this.pendingSubmitAttempt = { fingerprint, clientRequestId };
     const run: ActiveRun = {
       id: ++this.runSequence,
       threadKey: thread.key,
@@ -268,10 +288,16 @@ export class TechnicalQaController {
       const diagnosticUploadIds: string[] = [];
       for (let index = 0; index < attachments.length; index += 1) {
         const attachment = attachments[index]!;
+        if (attachment.uploadId) {
+          diagnosticUploadIds.push(attachment.uploadId);
+          this.patch({ uploadProgress: { completed: index + 1, total: attachments.length } });
+          continue;
+        }
         this.setAttachmentStatus(attachment.clientUploadId, 'uploading');
         const uploaded = await this.api.uploadDiagnostic(stripAttachmentState(attachment), run.abortController.signal);
         if (!this.isCurrent(run)) return;
         diagnosticUploadIds.push(uploaded.uploadId);
+        this.cacheAttachmentUpload(attachment.clientUploadId, uploaded.uploadId);
         this.patch({ uploadProgress: { completed: index + 1, total: attachments.length } });
       }
       uploadsCompleted = true;
@@ -286,6 +312,7 @@ export class TechnicalQaController {
       };
       const accepted = await this.api.submit(request, run.abortController.signal);
       if (!this.isCurrent(run)) return;
+      this.pendingSubmitAttempt = undefined;
       const turn: QaTranscriptTurn = {
         clientRequestId,
         question,
@@ -317,7 +344,7 @@ export class TechnicalQaController {
         uploadProgress: undefined,
         pendingAttachments: this.state.pendingAttachments.map((attachment) => ({
           ...attachment,
-          status: uploadsCompleted ? 'pending' : 'error',
+          status: attachment.uploadId ? 'uploaded' : uploadsCompleted ? 'pending' : 'error',
         })),
       });
       this.finishRun(run);
@@ -423,6 +450,14 @@ export class TechnicalQaController {
     });
   }
 
+  private cacheAttachmentUpload(clientUploadId: string, uploadId: string): void {
+    this.patch({
+      pendingAttachments: this.state.pendingAttachments.map((attachment) => (
+        attachment.clientUploadId === clientUploadId ? { ...attachment, uploadId, status: 'uploaded' } : attachment
+      )),
+    });
+  }
+
   private updateThread(threadKey: string, update: (thread: QaThreadSession) => QaThreadSession): void {
     this.patch({
       threads: this.state.threads.map((thread) => thread.key === threadKey ? update(thread) : thread),
@@ -444,6 +479,21 @@ export class TechnicalQaController {
     this.state = { ...this.state, ...patch };
     for (const listener of this.listeners) listener();
   }
+}
+
+function createSubmitFingerprint(
+  thread: QaThreadSession,
+  question: string,
+  domain: QaDomain,
+  attachments: readonly PreparedQaAttachment[],
+): string {
+  return JSON.stringify({
+    threadKey: thread.key,
+    threadId: thread.threadId ?? null,
+    question,
+    domain,
+    attachments: attachments.map((attachment) => attachment.clientUploadId),
+  });
 }
 
 function stripAttachmentState(attachment: PreparedQaAttachment): QaDiagnosticUploadRequest {
