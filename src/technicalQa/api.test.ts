@@ -1,0 +1,168 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ElectronAPI } from '../types/electron';
+import {
+  cancelTechnicalQaTurn,
+  fetchTechnicalQaEvents,
+  fetchTechnicalQaHealth,
+  fetchTechnicalQaThread,
+  submitTechnicalQaQuestion,
+  TechnicalQaApiError,
+} from './api';
+import type { QaQuestionRequest } from './types';
+
+type TestWindow = {
+  electronAPI?: Partial<ElectronAPI>;
+  localStorage?: Pick<Storage, 'getItem' | 'setItem'>;
+  location?: { protocol: string };
+};
+type GlobalWithWindow = { window?: TestWindow };
+
+const globalWithWindow = globalThis as unknown as GlobalWithWindow;
+const originalWindow = globalWithWindow.window;
+const sessionId = 'qa-session-0001';
+
+const question: QaQuestionRequest = {
+  schemaVersion: 1,
+  clientRequestId: 'request-1',
+  question: 'How does this ECA event work?',
+  scope: { product: 'y3_editor', editorVersion: '2.0', domain: 'eca_editor' },
+};
+
+afterEach(() => {
+  globalWithWindow.window = originalWindow;
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('Technical QA browser transport', () => {
+  it('uses only X-QA-Session for health and preserves unavailable health as state', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ schemaVersion: 1, ready: false }, 503));
+    vi.stubGlobal('fetch', fetchMock);
+    globalWithWindow.window = testWindow();
+
+    await expect(fetchTechnicalQaHealth()).resolves.toEqual({
+      available: false,
+      message: 'Technical QA service is currently unavailable.',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/qa/health', expect.objectContaining({
+      method: 'GET',
+      headers: { 'X-QA-Session': sessionId },
+    }));
+    expect(JSON.stringify(fetchMock.mock.calls[0])).not.toMatch(/ownerToken|[?&](?:session|token)=/i);
+  });
+
+  it('submits the frozen request body without session, provider, model, or project fields', async () => {
+    const accepted = {
+      schemaVersion: 1 as const,
+      clientRequestId: 'request-1',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      acceptedAt: '2026-08-05T09:00:00.000Z',
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(accepted, 202));
+    vi.stubGlobal('fetch', fetchMock);
+    globalWithWindow.window = testWindow();
+
+    await expect(submitTechnicalQaQuestion(question)).resolves.toEqual(accepted);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/qa/turns');
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json', 'X-QA-Session': sessionId });
+    expect(JSON.parse(String(init.body))).toEqual(question);
+    expect(String(init.body)).not.toMatch(/session|ownerToken|provider|model|projectPath/i);
+  });
+
+  it('uses strict encoded thread/event/cancel paths without query credentials', async () => {
+    const page = { schemaVersion: 1, threadId: 'thread-1', turnId: 'turn-1', events: [], nextCursor: 2, terminal: false };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ schemaVersion: 1, threadId: 'thread-1', turns: [] }))
+      .mockResolvedValueOnce(jsonResponse(page))
+      .mockResolvedValueOnce(jsonResponse(page));
+    vi.stubGlobal('fetch', fetchMock);
+    globalWithWindow.window = testWindow();
+
+    await fetchTechnicalQaThread('thread-1');
+    await fetchTechnicalQaEvents({ schemaVersion: 1, threadId: 'thread-1', turnId: 'turn-1', after: 2 });
+    await cancelTechnicalQaTurn({ schemaVersion: 1, threadId: 'thread-1', turnId: 'turn-1' });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/qa/threads/thread-1',
+      '/api/qa/threads/thread-1/turns/turn-1/events?after=2',
+      '/api/qa/threads/thread-1/turns/turn-1/cancel',
+    ]);
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toMatch(/ownerToken|[?&](?:session|sessionId|token)=/i);
+    expect(JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body))).toEqual({ schemaVersion: 1 });
+  });
+
+  it('maps private or malformed backend failures to local public errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      error: { code: 'internal_error', message: 'C:\\private\\runtime.jsonl TOKEN=secret' },
+    }, 500)));
+    globalWithWindow.window = testWindow();
+
+    const error = await fetchTechnicalQaThread('thread-1').catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(TechnicalQaApiError);
+    expect(String(error)).toContain('Technical QA could not complete the request.');
+    expect(String(error)).not.toMatch(/private|runtime\.jsonl|TOKEN|secret/i);
+  });
+});
+
+describe('Technical QA Electron transport', () => {
+  it('uses the dedicated bridge with a header-only session input and structured bodies', async () => {
+    const technicalQaRequest = vi.fn<NonNullable<ElectronAPI['technicalQaRequest']>>()
+      .mockResolvedValue({ success: true, status: 202, payload: {
+        schemaVersion: 1,
+        clientRequestId: 'request-1',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        acceptedAt: '2026-08-05T09:00:00.000Z',
+      } });
+    globalWithWindow.window = testWindow({ technicalQaRequest });
+
+    await submitTechnicalQaQuestion(question);
+
+    expect(technicalQaRequest).toHaveBeenCalledWith({
+      path: '/api/qa/turns',
+      method: 'POST',
+      body: question,
+      sessionId,
+    });
+    expect(JSON.stringify(technicalQaRequest.mock.calls)).not.toMatch(/ownerToken|[?&](?:session|token)=/i);
+  });
+
+  it('sanitizes main-process transport failures', async () => {
+    const technicalQaRequest = vi.fn<NonNullable<ElectronAPI['technicalQaRequest']>>()
+      .mockResolvedValue({ success: false, status: 0, error: 'C:\\private\\TOKEN=secret' });
+    globalWithWindow.window = testWindow({ technicalQaRequest });
+
+    await expect(fetchTechnicalQaHealth()).rejects.toMatchObject({
+      code: 'service_unavailable',
+      message: 'Technical QA service is currently unavailable.',
+    });
+  });
+});
+
+function testWindow(electronAPI?: Partial<ElectronAPI>): TestWindow {
+  return {
+    electronAPI,
+    localStorage: createMemoryStorage(sessionId),
+    location: { protocol: 'http:' },
+  };
+}
+
+function createMemoryStorage(initialSession: string): Pick<Storage, 'getItem' | 'setItem'> {
+  const values = new Map<string, string>([['technicalQa.sessionId', initialSession]]);
+  return {
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => { values.set(key, value); }),
+  };
+}
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}

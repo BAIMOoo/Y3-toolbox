@@ -308,6 +308,17 @@ ipcMain.handle('agent-service:request', async (_event, request: unknown) => {
   }
 });
 
+// Technical QA uses an independent, header-only session boundary. Keep it separate
+// from Agent Job owner-token and query behavior.
+ipcMain.handle('technical-qa:request', async (_event, request: unknown) => {
+  try {
+    const result = await proxyTechnicalQaRequest(request);
+    return { success: true, ...result };
+  } catch {
+    return { success: false, status: 0, error: 'Technical QA service is unavailable.' };
+  }
+});
+
 // IPC: 读取本地 Archive 输入（只读，不写 archive 文件）。主进程校验 archive 边界后只返回已解析 JSON。
 ipcMain.handle('archive:readInput', async (_event, inputPath: string) => {
   try {
@@ -561,6 +572,36 @@ async function proxyAgentServiceRequest(value: unknown): Promise<AgentServicePro
     headers: {
       'Content-Type': 'application/json',
       ...(typeof value.ownerToken === 'string' ? { 'X-Owner-Token': value.ownerToken } : {}),
+    },
+    body: method === 'POST' ? JSON.stringify(value.body ?? {}) : undefined,
+  });
+  const payload = await response.json().catch(() => ({}));
+  return { status: response.status, payload };
+}
+
+async function proxyTechnicalQaRequest(value: unknown): Promise<AgentServiceProxyResponse> {
+  if (!isPlainObject(value) || typeof value.path !== 'string' || typeof value.sessionId !== 'string') {
+    throw new Error('Invalid Technical QA request');
+  }
+  const method = typeof value.method === 'string' ? value.method.toUpperCase() : 'GET';
+  if (method !== 'GET' && method !== 'POST') throw new Error('Invalid Technical QA method');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value.sessionId)) throw new Error('Invalid Technical QA session');
+  if (!value.path.startsWith('/api/qa/') || value.path.includes('://')) throw new Error('Invalid Technical QA path');
+
+  const baseUrl = getConfiguredAgentRunnerUrl();
+  const configuredBase = new URL(baseUrl);
+  if (!['http:', 'https:'].includes(configuredBase.protocol)) throw new Error('Invalid Technical QA service URL');
+  const target = new URL(value.path, configuredBase);
+  if (target.origin !== configuredBase.origin) throw new Error('Invalid Technical QA origin');
+  for (const key of ['ownerToken', 'session', 'sessionId', 'token']) {
+    if (target.searchParams.has(key)) throw new Error('Technical QA session must not use query fields');
+  }
+
+  const response = await fetch(target, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-QA-Session': value.sessionId,
     },
     body: method === 'POST' ? JSON.stringify(value.body ?? {}) : undefined,
   });
