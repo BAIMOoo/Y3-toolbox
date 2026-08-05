@@ -1,4 +1,4 @@
-﻿import {
+import {
   BookOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -7,22 +7,52 @@
 } from '@ant-design/icons';
 import { Button, Segmented, Tag, Tooltip } from 'antd';
 import type { KeyboardEvent } from 'react';
-import { technicalQaApi } from './api';
-import type {
-  QaThreadSession,
-  QaTranscriptTurn,
-  TechnicalQaController,
-  TechnicalQaState,
-} from './controller';
-import { useTechnicalQaController } from './useTechnicalQaController';
+import type { QaTurnState } from './reducer';
 import type {
   QaCitation,
   QaDomain,
   QaEvidenceState,
-  QaTerminalOutcome,
   QaSourceAuthority,
+  QaTerminalOutcome,
 } from './types';
 import './TechnicalQa.css';
+
+export interface TechnicalQaController {
+  submit(): Promise<void>;
+  setDraft(draft: string): void;
+  setDomain(domain: QaDomain): void;
+  selectThread(threadKey: string): void;
+  startNewThread(): string;
+  cancelActiveTurn(): Promise<void>;
+  refreshHealth(): Promise<void>;
+}
+
+export interface QaTranscriptTurn {
+  clientRequestId: string;
+  question: string;
+  domain: QaDomain;
+  submittedAt: string;
+  state: QaTurnState;
+}
+
+export interface QaThreadSession {
+  key: string;
+  threadId?: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  turns: QaTranscriptTurn[];
+}
+
+export interface TechnicalQaState {
+  threads: QaThreadSession[];
+  activeThreadKey: string;
+  draft: string;
+  domain: QaDomain;
+  serviceStatus: 'checking' | 'ready' | 'unavailable';
+  serviceMessage?: string;
+  submitting: boolean;
+}
 
 export interface TechnicalQaWorkspaceViewProps {
   state: TechnicalQaState;
@@ -52,11 +82,6 @@ const EVIDENCE_STATE_COLORS: Record<QaEvidenceState, 'success' | 'gold' | 'error
   insufficient: 'gold',
   conflicting: 'error',
 };
-
-export function TechnicalQaWorkspace() {
-  const { state, controller } = useTechnicalQaController(technicalQaApi);
-  return <TechnicalQaWorkspaceView state={state} controller={controller} />;
-}
 
 export function TechnicalQaWorkspaceView({ state, controller }: TechnicalQaWorkspaceViewProps) {
   const activeThread = state.threads.find((thread) => thread.key === state.activeThreadKey) ?? state.threads[0];
