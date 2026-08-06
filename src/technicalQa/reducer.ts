@@ -57,6 +57,116 @@ function terminalStatus(outcome: QaTerminalOutcome): QaTurnStatus {
   return outcome.kind;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function isValidQaCitationId(value: string): boolean {
+  return value.length > 0
+    && value.length <= 128
+    && value === value.trim()
+    && !Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f;
+    });
+}
+
+function validateTerminalOutcome(outcome: QaTerminalOutcome): string | null {
+  if (outcome.kind !== 'answer' || !('outcomeSchemaVersion' in outcome) || outcome.outcomeSchemaVersion !== 2) {
+    return null;
+  }
+
+  if (!outcome.answer.trim()) return 'V2 answer must not be empty.';
+  if (!['conversation', 'grounded', 'mixed', 'inference'].includes(outcome.answerBasis)) {
+    return 'Unsupported v2 answer basis.';
+  }
+  if (!Array.isArray(outcome.supportSegments)) return 'V2 answer support segments must be an array.';
+  if (!Array.isArray(outcome.citations)) return 'V2 answer citations must be an array.';
+  if (!Array.isArray(outcome.notices)) return 'V2 answer notices must be an array.';
+  if (outcome.supportSegments.length === 0) return 'V2 answer support segments must not be empty.';
+
+  const segmentText = outcome.supportSegments.map((segment) => (isRecord(segment) ? segment.text : '')).join('');
+  if (segmentText !== outcome.answer) {
+    return 'V2 answer support segments must exactly concatenate to the plain answer.';
+  }
+
+  const citationIds = new Set<string>();
+  for (const citation of outcome.citations) {
+    if (!isRecord(citation) || typeof citation.citationId !== 'string' || !isValidQaCitationId(citation.citationId)) {
+      return 'V2 answer citations must include citation identifiers.';
+    }
+    if (citationIds.has(citation.citationId)) return `Duplicate v2 answer citation ${citation.citationId}.`;
+    citationIds.add(citation.citationId);
+  }
+
+  const referencedCitationIds = new Set<string>();
+  const segmentBases = new Set<string>();
+  let hasInference = false;
+  let hasGrounded = false;
+  let hasConversation = false;
+
+  for (const segment of outcome.supportSegments) {
+    if (!isRecord(segment)) return 'V2 answer support segments must be objects.';
+    if (typeof segment.text !== 'string' || !segment.text) {
+      return 'V2 answer support segment text must not be empty.';
+    }
+    if (!Array.isArray(segment.citationIds)) return 'V2 answer support segment citationIds must be an array.';
+    if (!segment.citationIds.every((citationId) => typeof citationId === 'string' && isValidQaCitationId(citationId))) {
+      return 'V2 answer support segment citationIds must be valid citation identifiers.';
+    }
+    const segmentCitationIds = segment.citationIds as string[];
+    const basis = segment.basis;
+    segmentBases.add(String(basis));
+
+    if (basis === 'grounded') {
+      hasGrounded = true;
+      if (segmentCitationIds.length === 0) {
+        return 'V2 grounded support segments must cite at least one source.';
+      }
+      for (const citationId of segmentCitationIds) {
+        if (!citationIds.has(citationId)) return `V2 grounded support segment cites unknown source ${citationId}.`;
+        referencedCitationIds.add(citationId);
+      }
+    } else if (basis === 'inference') {
+      hasInference = true;
+      if (segmentCitationIds.length > 0) {
+        return 'V2 inference support segments must not carry direct citation ids.';
+      }
+    } else if (basis === 'conversation') {
+      hasConversation = true;
+      if (segmentCitationIds.length > 0) {
+        return 'V2 conversation support segments must not carry direct citation ids.';
+      }
+    } else {
+      return 'Unsupported v2 answer support segment basis.';
+    }
+  }
+
+  if (outcome.answerBasis === 'conversation' && (hasGrounded || hasInference)) {
+    return 'V2 conversation answers must only include conversation support segments.';
+  }
+  if (outcome.answerBasis === 'grounded' && (hasConversation || hasInference)) {
+    return 'V2 grounded answers must only include grounded support segments.';
+  }
+  if (outcome.answerBasis === 'inference' && (hasConversation || hasGrounded)) {
+    return 'V2 inference answers must only include inference support segments.';
+  }
+  if (outcome.answerBasis === 'mixed' && segmentBases.size < 2) {
+    return 'V2 mixed answers must include more than one support basis.';
+  }
+  for (const citationId of citationIds) {
+    if (!referencedCitationIds.has(citationId)) return `V2 answer citation ${citationId} is not referenced.`;
+  }
+
+  for (const notice of outcome.notices) {
+    if (!isRecord(notice) || (notice.kind !== 'knowledge_unavailable' && notice.kind !== 'source_unavailable')) {
+      return 'Unsupported v2 answer notice code.';
+    }
+  }
+
+  return null;
+}
+
 export function reduceQaEvent(state: QaTurnState, event: QaEvent): QaTurnState {
   const fingerprint = eventFingerprint(event);
   const priorFingerprint = state.seenEventIds[event.eventId];
@@ -96,6 +206,8 @@ export function reduceQaEvent(state: QaTurnState, event: QaEvent): QaTurnState {
       return { ...next, status: 'streaming', answerText: next.answerText + event.payload.delta };
     case 'turn.completed': {
       const outcome = event.payload.outcome;
+      const outcomeError = validateTerminalOutcome(outcome);
+      if (outcomeError) return failProtocol(next, outcomeError);
       if (outcome.kind === 'answer' && next.answerText && outcome.answer !== next.answerText) {
         return failProtocol(next, 'Terminal answer does not match accumulated answer deltas.');
       }

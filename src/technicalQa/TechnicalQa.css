@@ -326,6 +326,37 @@
   gap: 8px;
 }
 
+.technical-qa__answer-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.technical-qa__support-segments,
+.technical-qa__answer-notices {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.technical-qa__support-segments {
+  display: grid;
+  gap: 8px;
+  padding-left: 20px;
+}
+
+.technical-qa__support-segments .ant-tag,
+.technical-qa__answer-notices .ant-tag {
+  margin-right: 8px;
+}
+
+.technical-qa__answer-notices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 0;
+  list-style: none;
+}
+
 .technical-qa__terminal-actions {
   margin-top: 2px;
 }

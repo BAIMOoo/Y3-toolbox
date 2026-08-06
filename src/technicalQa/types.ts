@@ -67,6 +67,40 @@ export interface QaCitation {
 
 export type QaNonEmptyCitations = [QaCitation, ...QaCitation[]];
 
+export type QaAnswerOutcomeSchemaVersion = 2;
+export type QaAnswerBasis = 'conversation' | 'grounded' | 'mixed' | 'inference';
+export type QaAnswerSupportBasis = 'conversation' | 'grounded' | 'inference';
+
+export interface QaAnswerSupportSegment {
+  text: string;
+  basis: QaAnswerSupportBasis;
+  citationIds: string[];
+}
+
+export type QaAnswerNoticeKind = 'knowledge_unavailable' | 'source_unavailable';
+
+export interface QaAnswerNotice {
+  kind: QaAnswerNoticeKind;
+}
+
+export interface QaAnswerOutcomeV1 {
+  kind: 'answer';
+  answer: string;
+  evidenceState: 'sufficient';
+  citations: QaNonEmptyCitations;
+}
+
+export interface QaAnswerOutcomeV2 {
+  kind: 'answer';
+  outcomeSchemaVersion: QaAnswerOutcomeSchemaVersion;
+  answer: string;
+  evidenceState: QaEvidenceState;
+  answerBasis: QaAnswerBasis;
+  supportSegments: QaAnswerSupportSegment[];
+  citations: QaCitation[];
+  notices: QaAnswerNotice[];
+}
+
 export type QaRefusalCode =
   | 'unsupported_scope'
   | 'forbidden_capability'
@@ -84,7 +118,8 @@ export type QaPublicErrorCode =
   | 'internal_error';
 
 export type QaTerminalOutcome =
-  | { kind: 'answer'; answer: string; evidenceState: 'sufficient'; citations: QaNonEmptyCitations }
+  | QaAnswerOutcomeV1
+  | QaAnswerOutcomeV2
   | {
       kind: 'follow_up';
       prompt: string;

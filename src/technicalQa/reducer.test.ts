@@ -13,6 +13,94 @@ describe('technical QA transport-neutral event reducer', () => {
     }
   });
 
+  it('accepts additive v2 answer outcomes while preserving v1 event and page schemas', () => {
+    const page = QA_CLIENT_EVENT_FIXTURES.answerV2;
+    const state = reduceQaEventPage(createInitialQaTurnState(), page);
+
+    expect(page.schemaVersion).toBe(1);
+    expect(page.events.every((event) => event.schemaVersion === 1)).toBe(true);
+    expect(state.status).toBe('answer');
+    expect(state.answerText).toBe(state.outcome?.kind === 'answer' ? state.outcome.answer : '');
+    expect(state.answerText).toBe(
+      'Use y3.timer.loop for repeated callbacks. If callback cost is high, infer that a longer interval is safer.',
+    );
+    expect(state.outcome).toMatchObject({
+      kind: 'answer',
+      outcomeSchemaVersion: 2,
+      answerBasis: 'mixed',
+      supportSegments: [
+        { text: 'Use y3.timer.loop for repeated callbacks. ', basis: 'grounded', citationIds: ['citation-lua-timer'] },
+        { text: 'If callback cost is high, infer that a longer interval is safer.', basis: 'inference', citationIds: [] },
+      ],
+    });
+    expect(state.citations).toHaveLength(1);
+    expect(state.terminal).toBe(true);
+  });
+
+  it('rejects v2 answers whose support segments do not exactly concatenate to the plain answer', () => {
+    const state = reduceQaEventPage(createInitialQaTurnState(), QA_CLIENT_EVENT_FIXTURES.answerV2InvalidSegmentConcat);
+
+    expect(state.status).toBe('protocol_error');
+    expect(state.protocolError).toMatch(/support segments.*answer/i);
+  });
+
+  it('rejects v2 answers whose answer and support-segment text are whitespace-only', () => {
+    const page = structuredClone(QA_CLIENT_EVENT_FIXTURES.answerV2);
+    const terminalEvent = page.events.at(-1);
+    const outcome = terminalEvent?.payload.type === 'turn.completed' ? terminalEvent.payload.outcome : null;
+    if (!outcome || outcome.kind !== 'answer' || !('outcomeSchemaVersion' in outcome)) {
+      throw new Error('expected v2 answer fixture');
+    }
+    outcome.answer = '   ';
+    outcome.answerBasis = 'inference';
+    outcome.evidenceState = 'insufficient';
+    outcome.supportSegments = [{ basis: 'inference', text: '   ', citationIds: [] }];
+    outcome.citations = [];
+    outcome.notices = [];
+    let whitespaceDelta = '   ';
+    for (const event of page.events) {
+      if (event.payload.type === 'answer.delta') {
+        event.payload.delta = whitespaceDelta;
+        whitespaceDelta = '';
+      }
+    }
+
+    const state = reduceQaEventPage(createInitialQaTurnState(), page);
+
+    expect(state.status).toBe('protocol_error');
+    expect(state.protocolError).toMatch(/answer must not be empty/i);
+  });
+
+  it('rejects malformed v2 returned citation ids and support-segment citation references', () => {
+    for (const malformedId of ['', ' citation-lua-timer', 'citation-lua-timer ', 'citation\nlua', 'c'.repeat(129)]) {
+      const returnedIdPage = structuredClone(QA_CLIENT_EVENT_FIXTURES.answerV2);
+      const returnedIdTerminalEvent = returnedIdPage.events.at(-1);
+      const returnedIdOutcome = returnedIdTerminalEvent?.payload.type === 'turn.completed'
+        ? returnedIdTerminalEvent.payload.outcome
+        : null;
+      if (!returnedIdOutcome || returnedIdOutcome.kind !== 'answer' || !('outcomeSchemaVersion' in returnedIdOutcome)) {
+        throw new Error('expected v2 answer fixture');
+      }
+      returnedIdOutcome.citations[0]!.citationId = malformedId;
+      const returnedIdState = reduceQaEventPage(createInitialQaTurnState(), returnedIdPage);
+      expect(returnedIdState.status).toBe('protocol_error');
+      expect(returnedIdState.protocolError).toMatch(/citation identifiers/i);
+
+      const supportRefPage = structuredClone(QA_CLIENT_EVENT_FIXTURES.answerV2);
+      const supportRefTerminalEvent = supportRefPage.events.at(-1);
+      const supportRefOutcome = supportRefTerminalEvent?.payload.type === 'turn.completed'
+        ? supportRefTerminalEvent.payload.outcome
+        : null;
+      if (!supportRefOutcome || supportRefOutcome.kind !== 'answer' || !('outcomeSchemaVersion' in supportRefOutcome)) {
+        throw new Error('expected v2 answer fixture');
+      }
+      supportRefOutcome.supportSegments[0]!.citationIds = [malformedId];
+      const supportRefState = reduceQaEventPage(createInitialQaTurnState(), supportRefPage);
+      expect(supportRefState.status).toBe('protocol_error');
+      expect(supportRefState.protocolError).toMatch(/citationIds.*valid citation identifiers/i);
+    }
+  });
+
   it('converges on follow-up and refusal outcomes without fabricating an answer', () => {
     for (const page of [
       QA_CLIENT_EVENT_FIXTURES.ambiguousFollowUp,

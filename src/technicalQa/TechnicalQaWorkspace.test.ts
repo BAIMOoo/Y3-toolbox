@@ -3,6 +3,7 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { QaThreadSession, QaTranscriptTurn, TechnicalQaController, TechnicalQaState } from './controller';
+import { QA_CLIENT_EVENT_FIXTURES } from './fixtures';
 import { createInitialQaTurnState, type QaTurnState } from './reducer';
 import { TechnicalQaWorkspaceView } from './TechnicalQaWorkspace';
 import type { QaDomain, QaTerminalOutcome } from './types';
@@ -139,6 +140,24 @@ describe('TechnicalQaWorkspaceView', () => {
     expect(screen.getByText('Triggers > Events')).toBeTruthy();
   });
 
+  it('renders v2 support segments in answer order with inference and unavailable-source notices outside plain answer', () => {
+    const answerV2 = completedOutcome(QA_CLIENT_EVENT_FIXTURES.answerV2);
+    renderWorkspace(stateWith([
+      thread('thread-v2', [turn('q-v2', terminalState(answerV2))], 'v2 会话'),
+    ]));
+
+    const plainAnswer = screen.getByText(
+      'Use y3.timer.loop for repeated callbacks. If callback cost is high, infer that a longer interval is safer.',
+    );
+    expect(plainAnswer).toBeTruthy();
+    expect(plainAnswer.textContent).not.toMatch(/来源支持|推断|知识不可用|来源不可用/);
+    expect(screen.getByText('来源支持')).toBeTruthy();
+    expect(screen.getByText('推断')).toBeTruthy();
+    expect(screen.getByText('知识不可用')).toBeTruthy();
+    expect(screen.getByText('来源不可用')).toBeTruthy();
+    expect(screen.getByText('y3-lualib Timer API')).toBeTruthy();
+  });
+
   it.each([
     ['follow_up', { kind: 'follow_up', prompt: '请补充准确的 API 符号。', missingInformation: ['API 符号'], evidenceState: 'insufficient', citations: [] }],
     ['refusal', { kind: 'refusal', code: 'insufficient_evidence', message: '证据不足，无法给出可靠回答。', evidenceState: 'insufficient', citations: [] }],
@@ -146,7 +165,7 @@ describe('TechnicalQaWorkspaceView', () => {
   ] as Array<[string, QaTerminalOutcome]>)('renders the %s terminal state', (_kind, outcome) => {
     renderWorkspace(stateWith([thread('thread-1', [turn('q-1', terminalState(outcome))], '终态会话')]));
 
-    const expected = outcome.kind === 'follow_up' ? outcome.prompt : 'message' in outcome ? outcome.message : '';
+    const expected = terminalOutcomeText(outcome);
     expect(screen.getByText(expected)).toBeTruthy();
   });
 
@@ -247,6 +266,18 @@ function terminalState(outcome: QaTerminalOutcome): QaTurnState {
     answerText: outcome.kind === 'answer' ? outcome.answer : '',
     citations: 'citations' in outcome ? outcome.citations : [],
   };
+}
+
+function completedOutcome(page: typeof QA_CLIENT_EVENT_FIXTURES.answerV2): QaTerminalOutcome {
+  const completed = page.events.at(-1);
+  if (!completed || completed.payload.type !== 'turn.completed') throw new Error('expected completed fixture');
+  return completed.payload.outcome;
+}
+
+function terminalOutcomeText(outcome: QaTerminalOutcome): string {
+  if (outcome.kind === 'follow_up') return outcome.prompt;
+  if ('message' in outcome) return outcome.message;
+  return '';
 }
 
 function controllerDouble(): TechnicalQaController {

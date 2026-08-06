@@ -57,6 +57,23 @@ describe('technical QA public wire contract', () => {
     expect(code).toBe('retrieval_unavailable');
   });
 
+  it('exports the additive v2 answer shape with required notices and segment citation arrays', () => {
+    const outcome: QaTerminalOutcome = {
+      kind: 'answer',
+      outcomeSchemaVersion: 2,
+      answer: 'Inference-only answer.',
+      evidenceState: 'insufficient',
+      answerBasis: 'inference',
+      supportSegments: [{ text: 'Inference-only answer.', basis: 'inference', citationIds: [] }],
+      citations: [],
+      notices: [{ kind: 'knowledge_unavailable' }],
+    };
+
+    expect(outcome.citations).toHaveLength(0);
+    expect(outcome.notices[0]?.kind).toBe('knowledge_unavailable');
+    expect(outcome.supportSegments[0]?.citationIds).toEqual([]);
+  });
+
   it('builds only the strict QA turn polling path and rejects malformed cursors', () => {
     expect(buildQaEventPath({ schemaVersion: 1, threadId: 'thread / 1', turnId: 'turn?1', after: 2 })).toBe(
       '/api/qa/threads/thread%20%2F%201/turns/turn%3F1/events?after=2',

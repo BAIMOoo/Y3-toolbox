@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ElectronAPI } from '../types/electron';
 import {
   cancelTechnicalQaTurn,
@@ -21,6 +21,7 @@ type GlobalWithWindow = { window?: TestWindow };
 const globalWithWindow = globalThis as unknown as GlobalWithWindow;
 const originalWindow = globalWithWindow.window;
 const sessionId = 'qa-session-0001';
+const stableReceiptValidationTime = new Date('2026-08-06T08:00:00.000Z').getTime();
 
 const question: QaQuestionRequest = {
   schemaVersion: 1,
@@ -28,6 +29,10 @@ const question: QaQuestionRequest = {
   question: 'How does this ECA event work?',
   scope: { product: 'y3_editor', editorVersion: '2.0', domain: 'eca_editor' },
 };
+
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(stableReceiptValidationTime);
+});
 
 afterEach(() => {
   globalWithWindow.window = originalWindow;

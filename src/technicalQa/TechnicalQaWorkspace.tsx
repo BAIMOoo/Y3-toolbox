@@ -19,6 +19,8 @@ import type {
 } from './controller';
 import { useTechnicalQaController } from './useTechnicalQaController';
 import type {
+  QaAnswerNotice,
+  QaAnswerSupportSegment,
   QaCitation,
   QaDomain,
   QaEvidenceState,
@@ -54,6 +56,23 @@ const EVIDENCE_STATE_COLORS: Record<QaEvidenceState, 'success' | 'gold' | 'error
   sufficient: 'success',
   insufficient: 'gold',
   conflicting: 'error',
+};
+
+const SUPPORT_BASIS_LABELS: Record<QaAnswerSupportSegment['basis'], string> = {
+  conversation: '对话上下文',
+  grounded: '来源支持',
+  inference: '推断',
+};
+
+const SUPPORT_BASIS_COLORS: Record<QaAnswerSupportSegment['basis'], 'default' | 'blue' | 'purple'> = {
+  conversation: 'default',
+  grounded: 'blue',
+  inference: 'purple',
+};
+
+const NOTICE_LABELS: Record<QaAnswerNotice['kind'], string> = {
+  knowledge_unavailable: '知识不可用',
+  source_unavailable: '来源不可用',
 };
 
 export function TechnicalQaWorkspace() {
@@ -409,7 +428,7 @@ function TurnContent({ turn }: { turn: QaTranscriptTurn }) {
 
   switch (outcome.kind) {
     case 'answer':
-      return <p className="technical-qa__answer">{outcome.answer}</p>;
+      return <AnswerContent outcome={outcome} />;
     case 'follow_up':
       return (
         <div className="technical-qa__follow-up">
@@ -426,6 +445,37 @@ function TurnContent({ turn }: { turn: QaTranscriptTurn }) {
     case 'cancelled':
       return <p className="technical-qa__terminal-copy">{outcome.message}</p>;
   }
+}
+
+function AnswerContent({ outcome }: { outcome: Extract<QaTerminalOutcome, { kind: 'answer' }> }) {
+  if (!('outcomeSchemaVersion' in outcome) || outcome.outcomeSchemaVersion !== 2) {
+    return <p className="technical-qa__answer">{outcome.answer}</p>;
+  }
+
+  return (
+    <div className="technical-qa__answer-stack">
+      <p className="technical-qa__answer">{outcome.answer}</p>
+      {outcome.supportSegments.length > 0 && (
+        <ol className="technical-qa__support-segments" aria-label="答案依据片段">
+          {outcome.supportSegments.map((segment, index) => (
+            <li key={`${index}-${segment.basis}`}>
+              <Tag color={SUPPORT_BASIS_COLORS[segment.basis]}>{SUPPORT_BASIS_LABELS[segment.basis]}</Tag>
+              <span>{segment.text}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {outcome.notices.length > 0 && (
+        <ul className="technical-qa__answer-notices" aria-label="答案可用性提示">
+          {outcome.notices.map((notice, index) => (
+            <li key={`${notice.kind}-${index}`}>
+              <Tag>{NOTICE_LABELS[notice.kind]}</Tag>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function CitationList({ citations }: { citations: QaCitation[] }) {
