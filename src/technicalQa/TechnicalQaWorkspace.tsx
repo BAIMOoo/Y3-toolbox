@@ -103,7 +103,7 @@ export function TechnicalQaWorkspaceView({ state, controller }: TechnicalQaWorks
           <h1>技术问答</h1>
         </div>
         <div className="technical-qa__scope" aria-label="问答范围">
-          <Tag bordered={false}>只读问答</Tag>
+          <Tag variant="filled">只读问答</Tag>
           <Tag color="blue">Y3 2.0</Tag>
           <ServiceStatus status={state.serviceStatus} />
         </div>
