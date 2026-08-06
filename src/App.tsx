@@ -15,6 +15,7 @@ import { EmptyState } from './components/EmptyState';
 import { filterSnapshot } from './utils/filterSnapshot';
 import { LocalArchiveViewer, type LocalArchiveInitialOpen } from './archiveViewer/LocalArchiveViewer';
 import { AgentJobCenter } from './agentJobs/AgentJobCenter';
+import { TechnicalQaWorkspace } from './technicalQa/TechnicalQaWorkspace';
 import { classifyOpenFilePath, classifyLocalInput, getDroppedLocalInputs, routeRequiresLocalArchive, shouldSkipRootDropRoute, type OpenFileRoute } from './utils/openFileRouting';
 import { shouldShowDiffContextToolbar } from './utils/diffUiState';
 import { RecoveryPanel } from './recovery/RecoveryPanel';
@@ -57,7 +58,7 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-type AppMode = 'diff' | 'local-archive' | 'agent-jobs';
+type AppMode = 'diff' | 'local-archive' | 'agent-jobs' | 'technical-qa';
 type DiffWorkspaceMode = 'compare' | 'recovery';
 type UiTone = 'graphite' | 'paper';
 
@@ -354,6 +355,7 @@ function App() {
                 { label: '变动日志', value: 'diff' },
                 { label: '本地 Archive', value: 'local-archive' },
                 { label: 'Agent 任务', value: 'agent-jobs' },
+                { label: '技术问答', value: 'technical-qa' },
               ]}
             />
           </div>
@@ -377,6 +379,14 @@ function App() {
             <LocalArchiveViewer initialOpen={pendingArchiveOpen} onInitialPathConsumed={() => setPendingArchiveOpen(null)} />
           )}
           {mode === 'agent-jobs' && <AgentJobCenter />}
+          <section
+            data-testid="technical-qa-shell"
+            hidden={mode !== 'technical-qa'}
+            aria-hidden={mode !== 'technical-qa'}
+            className="technical-qa-shell"
+          >
+            <TechnicalQaWorkspace />
+          </section>
           <section
             data-testid="diff-workspace"
             hidden={mode !== 'diff'}

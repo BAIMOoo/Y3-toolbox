@@ -48,6 +48,10 @@ export interface ElectronAPI {
     | { success: true; status: number; payload: unknown }
     | { success: false; status: number; error: string }
   >;
+  technicalQaRequest?: (request: { path: string; method?: 'GET' | 'POST'; body?: unknown; sessionId: string }) => Promise<
+    | { success: true; status: number; payload: unknown }
+    | { success: false; status: 0; error: string }
+  >;
   readArchiveInput: (inputPath: string) => Promise<
     | {
       success: true;
