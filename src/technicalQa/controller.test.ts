@@ -335,6 +335,262 @@ describe('TechnicalQaController', () => {
     expect(activeTurn(controller).state.answerText).toBe('Create an ECA trigger for the event.');
   });
 
+  it('continues past the legacy 240 non-terminal poll ceiling by default and accepts the backend terminal answer', async () => {
+    const emptyPage: QaEventPage = {
+      schemaVersion: 1,
+      threadId: 'thread-fixture',
+      turnId: 'turn-fixture',
+      events: [],
+      nextCursor: 0,
+      terminal: false,
+    };
+    const api = fakeApi([
+      ...Array.from({ length: 240 }, () => emptyPage),
+      QA_CLIENT_EVENT_FIXTURES.ecaAnswer,
+    ]);
+    const controller = createTechnicalQaController(api, { sleep: immediateSleep, createId: () => 'request-1' });
+    controller.setDraft('Slow but valid answer');
+
+    await controller.submit();
+
+    expect(api.events).toHaveBeenCalledTimes(241);
+    expect(activeTurn(controller).state).toMatchObject({ status: 'answer', terminal: true });
+    expect(activeTurn(controller).state.outcome).toMatchObject({
+      kind: 'answer',
+      answer: 'Create an ECA trigger for the event.',
+    });
+  });
+
+  it('keeps waiting through transient poll failures by default and clears reconnect status after recovery', async () => {
+    const api = fakeApi([]);
+    vi.mocked(api.events)
+      .mockRejectedValueOnce(new Error('temporary socket reset with private details'))
+      .mockRejectedValueOnce(new Error('temporary socket reset with private details'))
+      .mockResolvedValueOnce(QA_CLIENT_EVENT_FIXTURES.ecaAnswer);
+    const controller = createTechnicalQaController(api, { sleep: immediateSleep, createId: () => 'request-1' });
+    controller.setDraft('Recover this answer');
+
+    await controller.submit();
+
+    expect(api.events).toHaveBeenCalledTimes(3);
+    expect(activeTurn(controller).state).toMatchObject({ status: 'answer', terminal: true });
+    expect(controller.getSnapshot().serviceMessage).toBeUndefined();
+    expect(JSON.stringify(controller.getSnapshot())).not.toContain('temporary socket reset');
+  });
+
+  it('stops polling when the backend says the event cursor has expired', async () => {
+    const api = fakeApi([]);
+    vi.mocked(api.events)
+      .mockRejectedValueOnce(new TechnicalQaApiError('cursor_expired', 410))
+      .mockResolvedValueOnce(QA_CLIENT_EVENT_FIXTURES.ecaAnswer);
+    const controller = createTechnicalQaController(api, { sleep: immediateSleep, createId: () => 'request-1' });
+    controller.setDraft('Do not retry an expired cursor');
+
+    await controller.submit();
+
+    expect(api.events).toHaveBeenCalledOnce();
+    expect(activeTurn(controller).state).toMatchObject({
+      status: 'error',
+      terminal: true,
+      outcome: { kind: 'error', code: 'cursor_expired' },
+    });
+    expect(controller.getSnapshot().serviceMessage).toBeUndefined();
+  });
+
+  it('restores an accepted non-terminal turn from storage and resumes polling after initialize', async () => {
+    const complete = QA_CLIENT_EVENT_FIXTURES.ecaAnswer;
+    const firstPage: QaEventPage = {
+      ...complete,
+      events: complete.events.slice(0, 3),
+      nextCursor: 3,
+      terminal: false,
+    };
+    let sleepSignal: AbortSignal | undefined;
+    const storage = createMemoryStorage();
+    const firstApi = fakeApi([firstPage]);
+    const firstController = createTechnicalQaController(firstApi, {
+      storage,
+      createId: () => 'request-1',
+      sleep: (_milliseconds, signal) => {
+        sleepSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+    });
+    firstController.setDraft('Restore this pending answer');
+
+    const firstSubmit = firstController.submit();
+    await vi.waitFor(() => expect(sleepSignal).toBeDefined());
+    firstController.dispose();
+    await firstSubmit;
+
+    expect(storage.getItem('technicalQa.pendingTurn.v1')).toContain('Restore this pending answer');
+
+    const restoredApi = fakeApi([{
+      ...complete,
+      events: complete.events.slice(3),
+    }]);
+    const restoredController = createTechnicalQaController(restoredApi, {
+      storage,
+      sleep: immediateSleep,
+      createId: () => 'new-empty-thread',
+    });
+
+    await restoredController.initialize();
+    await vi.waitFor(() => expect(activeTurn(restoredController).state.status).toBe('answer'));
+
+    expect(restoredApi.submit).not.toHaveBeenCalled();
+    expect(restoredApi.events).toHaveBeenCalledWith(expect.objectContaining({ after: 3 }), expect.any(AbortSignal));
+    expect(activeTurn(restoredController).question).toBe('Restore this pending answer');
+    expect(storage.getItem('technicalQa.pendingTurn.v1')).toBeNull();
+  });
+
+  it('rejects malformed restored turn state without polling or leaking untrusted state fields', async () => {
+    const storage = createMemoryStorage();
+    storage.setItem('technicalQa.pendingTurn.v1', JSON.stringify({
+      schemaVersion: 1,
+      thread: {
+        key: 'thread-key',
+        threadId: 'thread-fixture',
+        title: 'Malicious',
+        createdAt: '2026-08-05T09:00:00.000Z',
+        updatedAt: '2026-08-05T09:00:00.000Z',
+        turns: [],
+      },
+      turn: {
+        clientRequestId: 'request-1',
+        question: 'Malicious pending question',
+        domain: 'bad-domain',
+        submittedAt: '2026-08-05T09:00:00.000Z',
+        state: {
+          threadId: 'thread-fixture',
+          turnId: 'turn-fixture',
+          lastSequence: -1,
+          answerText: '<script>do-not-trust</script>',
+          status: 'answer',
+          terminal: false,
+          outcome: { kind: 'answer', answer: 'forged' },
+        },
+      },
+    }));
+    const api = fakeApi([QA_CLIENT_EVENT_FIXTURES.ecaAnswer]);
+    const controller = createTechnicalQaController(api, {
+      storage,
+      sleep: immediateSleep,
+      createId: () => 'fresh-thread',
+    });
+
+    await controller.initialize();
+
+    expect(api.events).not.toHaveBeenCalled();
+    expect(controller.getSnapshot().threads).toEqual([
+      expect.objectContaining({ key: 'fresh-thread', turns: [] }),
+    ]);
+    expect(storage.getItem('technicalQa.pendingTurn.v1')).toBeNull();
+    expect(JSON.stringify(controller.getSnapshot())).not.toContain('do-not-trust');
+  });
+
+  it('treats storage SecurityError as unavailable storage and continues without throwing', async () => {
+    const storage = throwingStorage();
+    const api = fakeApi([QA_CLIENT_EVENT_FIXTURES.ecaAnswer]);
+    const controller = createTechnicalQaController(api, {
+      storage,
+      sleep: immediateSleep,
+      createId: () => 'request-1',
+    });
+    controller.setDraft('Storage failure should not break QA');
+
+    await controller.initialize();
+    await controller.submit();
+
+    expect(activeTurn(controller).state.status).toBe('answer');
+    expect(storage.getItem).toHaveBeenCalled();
+    expect(storage.setItem).toHaveBeenCalled();
+    expect(storage.removeItem).toHaveBeenCalled();
+  });
+
+  it('can cancel a restored pending turn before health recovery starts polling and clears storage', async () => {
+    const storage = createMemoryStorage();
+    storage.setItem('technicalQa.pendingTurn.v1', persistedPendingTurnPayload());
+    const api = fakeApi([], { available: false, message: 'Service down.' });
+    const controller = createTechnicalQaController(api, {
+      storage,
+      sleep: immediateSleep,
+      createId: () => 'unused-thread',
+    });
+
+    await controller.cancelActiveTurn();
+
+    expect(api.cancel).toHaveBeenCalledWith(
+      { schemaVersion: 1, threadId: 'thread-fixture', turnId: 'turn-fixture' },
+      expect.any(AbortSignal),
+    );
+    expect(activeTurn(controller).state).toMatchObject({
+      status: 'cancelled',
+      terminal: true,
+      outcome: { kind: 'cancelled' },
+    });
+    expect(storage.getItem('technicalQa.pendingTurn.v1')).toBeNull();
+  });
+
+  it('locally abandons a restored pending turn when service is unavailable and backend cancel cannot confirm', async () => {
+    const storage = createMemoryStorage();
+    storage.setItem('technicalQa.pendingTurn.v1', persistedPendingTurnPayload());
+    const api = fakeApi([], { available: false, message: 'Service down.' });
+    vi.mocked(api.cancel).mockRejectedValue(new Error('cancel route unavailable'));
+    const controller = createTechnicalQaController(api, {
+      storage,
+      sleep: immediateSleep,
+      createId: () => 'unused-thread',
+    });
+    await controller.initialize();
+
+    await controller.cancelActiveTurn();
+
+    expect(api.events).not.toHaveBeenCalled();
+    expect(activeTurn(controller).state).toMatchObject({
+      status: 'cancelled',
+      terminal: true,
+      outcome: { kind: 'cancelled' },
+    });
+    expect(controller.getSnapshot().serviceMessage).toBe('The restored answer was abandoned locally because the service is unavailable.');
+    expect(storage.getItem('technicalQa.pendingTurn.v1')).toBeNull();
+  });
+
+  it('backs off repeated default poll failures exponentially up to a cap and resets after a successful event page', async () => {
+    const sleepDurations: number[] = [];
+    const api = fakeApi([]);
+    vi.mocked(api.events)
+      .mockRejectedValueOnce(new Error('temporary failure 1'))
+      .mockRejectedValueOnce(new Error('temporary failure 2'))
+      .mockRejectedValueOnce(new Error('temporary failure 3'))
+      .mockRejectedValueOnce(new Error('temporary failure 4'))
+      .mockRejectedValueOnce(new Error('temporary failure 5'))
+      .mockRejectedValueOnce(new Error('temporary failure 6'))
+      .mockRejectedValueOnce(new Error('temporary failure 7'))
+      .mockResolvedValueOnce({
+        schemaVersion: 1,
+        threadId: 'thread-fixture',
+        turnId: 'turn-fixture',
+        events: [],
+        nextCursor: 0,
+        terminal: false,
+      })
+      .mockRejectedValueOnce(new Error('temporary failure after reset'))
+      .mockResolvedValueOnce(QA_CLIENT_EVENT_FIXTURES.ecaAnswer);
+    const controller = createTechnicalQaController(api, {
+      sleep: async (milliseconds) => { sleepDurations.push(milliseconds); },
+      createId: () => 'request-1',
+    });
+    controller.setDraft('Back off and recover');
+
+    await controller.submit();
+
+    expect(sleepDurations).toEqual([750, 1500, 3000, 6000, 12000, 15000, 15000, 750, 750]);
+    expect(activeTurn(controller).state.status).toBe('answer');
+  });
+
   it.each([
     ['follow_up', QA_CLIENT_EVENT_FIXTURES.ambiguousFollowUp],
     ['refusal', QA_CLIENT_EVENT_FIXTURES.conflictingRefusal],
@@ -554,4 +810,49 @@ function file(name: string, type: string, content: string): File {
     name, type, size: bytes.byteLength,
     arrayBuffer: vi.fn(async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)),
   } as unknown as File;
+}
+
+function createMemoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
+  const values = new Map<string, string>();
+  return {
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => { values.set(key, value); }),
+    removeItem: vi.fn((key: string) => { values.delete(key); }),
+  };
+}
+
+function throwingStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
+  return {
+    getItem: vi.fn(() => { throw new DOMException('Blocked', 'SecurityError'); }),
+    setItem: vi.fn(() => { throw new DOMException('Blocked', 'SecurityError'); }),
+    removeItem: vi.fn(() => { throw new DOMException('Blocked', 'SecurityError'); }),
+  };
+}
+
+function persistedPendingTurnPayload(): string {
+  return JSON.stringify({
+    schemaVersion: 1,
+    thread: {
+      key: 'thread-key',
+      threadId: 'thread-fixture',
+      title: 'Restored question',
+      createdAt: '2026-08-05T09:00:00.000Z',
+      updatedAt: '2026-08-05T09:00:00.000Z',
+      turns: [],
+    },
+    turn: {
+      clientRequestId: 'request-1',
+      question: 'Restored question',
+      domain: 'eca_editor',
+      submittedAt: '2026-08-05T09:00:00.000Z',
+      attachments: [{ kind: 'log', displayName: 'game.log', decodedByteSize: 123 }],
+      state: {
+        threadId: 'thread-fixture',
+        turnId: 'turn-fixture',
+        lastSequence: 0,
+        answerText: '',
+        terminal: false,
+      },
+    },
+  });
 }
