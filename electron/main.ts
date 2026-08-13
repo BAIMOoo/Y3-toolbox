@@ -319,6 +319,15 @@ ipcMain.handle('technical-qa:request', async (_event, request: unknown) => {
   }
 });
 
+ipcMain.handle('feedback:request', async (_event, request: unknown) => {
+  try {
+    const result = await proxyFeedbackRequest(request);
+    return { success: true, ...result };
+  } catch {
+    return { success: false, status: 0, error: 'Feedback service is unavailable.' };
+  }
+});
+
 // IPC: 读取本地 Archive 输入（只读，不写 archive 文件）。主进程校验 archive 边界后只返回已解析 JSON。
 ipcMain.handle('archive:readInput', async (_event, inputPath: string) => {
   try {
@@ -602,6 +611,49 @@ async function proxyTechnicalQaRequest(value: unknown): Promise<AgentServiceProx
     headers: {
       'Content-Type': 'application/json',
       'X-QA-Session': value.sessionId,
+    },
+    body: method === 'POST' ? JSON.stringify(value.body ?? {}) : undefined,
+  });
+  const payload = await response.json().catch(() => ({}));
+  return { status: response.status, payload };
+}
+
+async function proxyFeedbackRequest(value: unknown): Promise<AgentServiceProxyResponse> {
+  if (!isPlainObject(value) || typeof value.path !== 'string') {
+    throw new Error('Invalid Feedback request');
+  }
+  const method = typeof value.method === 'string' ? value.method.toUpperCase() : 'GET';
+  if (method !== 'GET' && method !== 'POST') throw new Error('Invalid Feedback method');
+  if (typeof value.sessionId !== 'undefined' && (typeof value.sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value.sessionId))) {
+    throw new Error('Invalid Feedback session');
+  }
+  if (!value.path.startsWith('/api/feedback/') || value.path.includes('://') || value.path.includes('?') || value.path.includes('#')) {
+    throw new Error('Invalid Feedback path');
+  }
+  if (/(?:^|\/)(?:\.|%2e){1,2}(?:\/|$)/i.test(value.path)) throw new Error('Invalid Feedback path');
+  let decodedPath = '';
+  try {
+    decodedPath = decodeURIComponent(value.path);
+  } catch {
+    throw new Error('Invalid Feedback path');
+  }
+  if (decodedPath.split(/[\\/]/).some((segment) => segment === '.' || segment === '..')) throw new Error('Invalid Feedback path');
+
+  const baseUrl = getConfiguredAgentRunnerUrl();
+  const configuredBase = new URL(baseUrl);
+  if (!['http:', 'https:'].includes(configuredBase.protocol)) throw new Error('Invalid Feedback service URL');
+  const target = new URL(value.path, configuredBase);
+  if (target.origin !== configuredBase.origin) throw new Error('Invalid Feedback origin');
+  if (!target.pathname.startsWith('/api/feedback/') || target.search || target.hash) throw new Error('Invalid Feedback path');
+  for (const key of ['ownerToken', 'qaToken', 'session', 'sessionId', 'token']) {
+    if (target.searchParams.has(key)) throw new Error('Feedback session must not use query fields');
+  }
+
+  const response = await fetch(target, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(typeof value.sessionId === 'string' ? { 'X-Feedback-Session': value.sessionId } : {}),
     },
     body: method === 'POST' ? JSON.stringify(value.body ?? {}) : undefined,
   });

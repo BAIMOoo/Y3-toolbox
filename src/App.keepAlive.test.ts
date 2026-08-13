@@ -15,6 +15,7 @@ const goToLast = vi.fn();
 const downloadCleanCsv = vi.fn();
 const timelineMounts = vi.fn();
 const technicalQaMounts = vi.fn();
+const feedbackMounts = vi.fn();
 
 const loadedTimePoints: TimePoint[] = [
   { index: 0, timestamp: new Date('2026-03-20T10:00:00'), changes: [{ key: '100-1', keyParts: ['100', '1'], rootKey: '100', oldValue: 'nil', newValue: '1', changeType: 'create' }] },
@@ -42,12 +43,14 @@ vi.mock('antd', () => ({
       }, option.label)
     )))
   ),
+  Button: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => React.createElement('button', { type: 'button', onClick }, children),
   theme: { darkAlgorithm: {}, defaultAlgorithm: {} },
 }));
 
 vi.mock('@ant-design/icons', () => ({
   MoonOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'moon'),
   SunOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'sun'),
+  MessageOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'message'),
 }));
 
 vi.mock('./hooks/useArchiveData', () => ({
@@ -137,6 +140,19 @@ vi.mock('./technicalQa/TechnicalQaWorkspace', () => ({
   },
 }));
 
+vi.mock('./feedback/FeedbackWorkspace', () => ({
+  FeedbackWorkspace: () => {
+    useEffect(() => {
+      feedbackMounts();
+    }, []);
+    return React.createElement(
+      'section',
+      { 'data-testid': 'feedback-workspace' },
+      React.createElement('input', { 'aria-label': 'feedback draft' }),
+    );
+  },
+}));
+
 vi.mock('./recovery/RecoveryPanel', () => ({
   RecoveryPanel: () => React.createElement('section', { 'data-testid': 'recovery-panel' }, 'recovery'),
 }));
@@ -161,6 +177,9 @@ describe('App workspace keep-alive behavior', () => {
 
     expect(initialTechnicalQaShell.hasAttribute('hidden')).toBe(true);
     expect(technicalQaMounts).toHaveBeenCalledTimes(1);
+    const initialFeedbackShell = screen.getByTestId('feedback-shell');
+    expect(initialFeedbackShell.hasAttribute('hidden')).toBe(true);
+    expect(feedbackMounts).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: '本地 Archive' }));
 
@@ -185,6 +204,20 @@ describe('App workspace keep-alive behavior', () => {
     expect(screen.getByTestId('technical-qa-shell')).toBe(initialTechnicalQaShell);
     expect((screen.getByRole('textbox', { name: 'technical qa draft' }) as HTMLInputElement).value).toBe('persistent question');
     expect(technicalQaMounts).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '反馈' }));
+    expect(screen.getByTestId('feedback-shell')).toBe(initialFeedbackShell);
+    expect(initialFeedbackShell.hasAttribute('hidden')).toBe(false);
+    const feedbackDraft = screen.getByRole('textbox', { name: 'feedback draft' }) as HTMLInputElement;
+    fireEvent.change(feedbackDraft, { target: { value: 'persistent feedback' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Agent 任务' }));
+    expect(initialFeedbackShell.hasAttribute('hidden')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '反馈' }));
+
+    expect(screen.getByTestId('feedback-shell')).toBe(initialFeedbackShell);
+    expect((screen.getByRole('textbox', { name: 'feedback draft' }) as HTMLInputElement).value).toBe('persistent feedback');
+    expect(feedbackMounts).toHaveBeenCalledTimes(1);
 
     expect(screen.getByTestId('timeline-sentinel').textContent).toContain('selected:2');
     expect(screen.getByTestId('filter-state').textContent).toContain('gold');

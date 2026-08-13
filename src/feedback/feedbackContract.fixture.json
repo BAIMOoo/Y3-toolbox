@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "bug": {
+    "session": {
+      "schemaVersion": 1,
+      "sessionId": "feedback-session-fixture",
+      "expiresAt": "2026-08-11T10:00:00.000Z"
+    },
+    "upload": {
+      "schemaVersion": 1,
+      "clientUploadId": "client-upload-log",
+      "kind": "log",
+      "displayName": "editor.log",
+      "mediaType": "text/plain",
+      "decodedByteSize": 11,
+      "contentBase64": "aGVsbG8gd29ybGQ="
+    },
+    "submission": {
+      "schemaVersion": 1,
+      "clientSubmissionId": "client-submission-bug",
+      "contact": "maintainer@example.com",
+      "metadata": {
+        "appVersion": "0.1.9",
+        "osFamily": "windows",
+        "activeModule": "agent-jobs"
+      },
+      "feedback": {
+        "type": "bug",
+        "title": "Archive compare failed",
+        "description": "The compare action shows a retryable failure.",
+        "reproduction": "Open two archives, then click compare.",
+        "expected": "The diff table is shown.",
+        "actual": "The app shows a failure banner.",
+        "attachmentUploadIds": ["feedback-upload-fixture"]
+      }
+    },
+    "acknowledgement": {
+      "schemaVersion": 1,
+      "accepted": true,
+      "message": "feedback_received"
+    }
+  },
+  "feature": {
+    "submission": {
+      "schemaVersion": 1,
+      "clientSubmissionId": "client-submission-feature",
+      "metadata": {
+        "appVersion": "0.1.9",
+        "osFamily": "windows",
+        "activeModule": "local-archive"
+      },
+      "feedback": {
+        "type": "feature",
+        "title": "Remember recent archive folders",
+        "scenario": "I compare archives from the same project repeatedly.",
+        "desiredImprovement": "Show recent folders in the picker.",
+        "value": "This removes repetitive navigation."
+      }
+    }
+  }
+}

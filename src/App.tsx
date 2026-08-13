@@ -1,8 +1,8 @@
 // src/App.tsx
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { ConfigProvider, theme, Alert, Segmented } from 'antd';
+import { ConfigProvider, theme, Alert, Button, Segmented } from 'antd';
 import type { ThemeConfig } from 'antd';
-import { MoonOutlined, SunOutlined } from '@ant-design/icons';
+import { MessageOutlined, MoonOutlined, SunOutlined } from '@ant-design/icons';
 import './App.css';
 import { useArchiveData } from './hooks/useArchiveData';
 import { FilterBar } from './components/FilterBar';
@@ -16,6 +16,7 @@ import { filterSnapshot } from './utils/filterSnapshot';
 import { LocalArchiveViewer, type LocalArchiveInitialOpen } from './archiveViewer/LocalArchiveViewer';
 import { AgentJobCenter } from './agentJobs/AgentJobCenter';
 import { TechnicalQaWorkspace } from './technicalQa/TechnicalQaWorkspace';
+import { FeedbackWorkspace } from './feedback/FeedbackWorkspace';
 import { classifyOpenFilePath, classifyLocalInput, getDroppedLocalInputs, routeRequiresLocalArchive, shouldSkipRootDropRoute, type OpenFileRoute } from './utils/openFileRouting';
 import { shouldShowDiffContextToolbar } from './utils/diffUiState';
 import { RecoveryPanel } from './recovery/RecoveryPanel';
@@ -58,7 +59,7 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-type AppMode = 'diff' | 'local-archive' | 'agent-jobs' | 'technical-qa';
+type AppMode = 'diff' | 'local-archive' | 'agent-jobs' | 'technical-qa' | 'feedback';
 type DiffWorkspaceMode = 'compare' | 'recovery';
 type UiTone = 'graphite' | 'paper';
 
@@ -359,6 +360,17 @@ function App() {
               ]}
             />
           </div>
+          <div className="app-feedback-entry">
+            <Button
+              size="small"
+              type={mode === 'feedback' ? 'primary' : 'text'}
+              icon={<MessageOutlined aria-hidden="true" />}
+              aria-current={mode === 'feedback' ? 'page' : undefined}
+              onClick={() => setMode('feedback')}
+            >
+              反馈
+            </Button>
+          </div>
           <div data-testid="tone-switch" className="app-tone-nav" aria-label={`界面主题切换 ${UI_TONE_RENDER_VERSION}`} title={uiTone === 'graphite' ? '当前：深灰模式' : '当前：纸面模式'}>
             <Segmented
               size="small"
@@ -386,6 +398,14 @@ function App() {
             className="technical-qa-shell"
           >
             <TechnicalQaWorkspace />
+          </section>
+          <section
+            data-testid="feedback-shell"
+            hidden={mode !== 'feedback'}
+            aria-hidden={mode !== 'feedback'}
+            className="feedback-shell"
+          >
+            <FeedbackWorkspace activeModule={mode} />
           </section>
           <section
             data-testid="diff-workspace"

@@ -183,6 +183,10 @@ body {
   overflow: hidden;
 }
 
+.app-shell--feedback {
+  overflow: hidden;
+}
+
 .app-shell-header {
   -webkit-app-region: drag;
   position: sticky;
@@ -321,6 +325,18 @@ body {
   display: none;
 }
 
+.feedback-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.feedback-shell[hidden] {
+  display: none;
+}
+
 .app-content--local-archive {
   overflow: hidden;
 }
@@ -330,6 +346,10 @@ body {
 }
 
 .app-content--technical-qa {
+  overflow: hidden;
+}
+
+.app-content--feedback {
   overflow: hidden;
 }
 
@@ -1718,6 +1738,18 @@ button {
   align-items: center;
 }
 
+.app-feedback-entry {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.app-feedback-entry .ant-btn {
+  min-height: 30px;
+  border-radius: 0;
+}
+
 .app-mode-nav .ant-segmented,
 .app-tone-nav .ant-segmented {
   background: var(--bg-primary) !important;
@@ -1987,6 +2019,10 @@ button {
     order: 3;
   }
 
+  .app-feedback-entry {
+    order: 2;
+  }
+
   .app-mode-nav {
     flex-basis: 100%;
     order: 4;
@@ -2005,7 +2041,7 @@ button {
 
 /* —— Header right-side icon-only tone switch —— */
 .app-tone-nav {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .app-window-controls {
