@@ -3,7 +3,7 @@
 ## Source of truth
 - Status: Active
 - Last refreshed: 2026-08-13
-- Primary product surfaces: change-log workbench, local Archive viewer, Agent Job Center, independent Technical QA workspace, dedicated Feedback workspace
+- Primary product surfaces: change-log workbench, local Archive viewer, Agent Job Center, independent Technical QA workspace, dedicated Feedback workspace, and local Y3 lobby configuration workspace
 - Evidence reviewed: `README.md`, `src/App.tsx`, `src/App.css`, `src/agentJobs/AgentJobCenter.tsx`, `docs/assets/readme/archive-diff-workbench.png`, the approved Technical QA handoff packet, and `.omx/plans/prd-user-feedback.md` plus `.omx/plans/test-spec-user-feedback.md`
 
 ## Brand
@@ -12,9 +12,9 @@
 - Avoid: marketing layouts, oversized headings, decorative cards, rounded pill-heavy UI, one-color screens, and hidden automation
 
 ## Product goals
-- Goals: make Y3 diagnostic and archive workflows fast to scan; make Technical QA and Feedback distinct first-class workspaces; give users a clear anonymous channel for actionable Bugs and Feature Requests; keep evidence, runtime state, and terminal outcomes understandable
-- Non-goals: a landing page, a general chat client, project-directory access, automatic diagnostics, feedback status tracking or history, reply promises, code patching, saving, publishing, BYOK, or model/provider selection
-- Success signals: users can switch modules without losing work, submit a structured anonymous Bug or Feature Request, retain a feedback draft after retryable failure, and receive a clear acknowledgement without a tracking identifier
+- Goals: make Y3 diagnostic and archive workflows fast to scan; make Technical QA, Feedback, and Lobby Configuration distinct first-class workspaces; give users a clear anonymous channel for actionable Bugs and Feature Requests; keep evidence, runtime state, and terminal outcomes understandable; configure `match.json` and `dungeon.json` safely from a selected Y3 source project
+- Non-goals: a landing page, a general chat client, unrestricted project-directory access, automatic diagnostics, feedback status tracking or history, reply promises, code patching, publishing, BYOK, or model/provider selection
+- Success signals: users can switch modules without losing work, submit a structured anonymous Bug or Feature Request, retain a feedback draft after retryable failure, receive a clear acknowledgement without a tracking identifier, and preview then write valid lobby configuration without losing unknown JSON fields
 
 ## Personas and jobs
 - Primary personas: Y3 map makers, gameplay scripters, technical support staff, and maintainers diagnosing editor/Lua behavior
@@ -22,8 +22,8 @@
 - Key contexts of use: Windows Electron desktop, long sessions, dense technical data, occasional narrow laptop windows, and slow or unavailable service connections
 
 ## Information architecture
-- Primary navigation: one compact top-level segmented control with `变动日志`, `本地 Archive`, `Agent 任务`, and `技术问答`; `反馈` is a persistent utility action immediately left of the theme switch
-- Core routes/screens: the existing workspaces, the independent Technical QA workspace, and a dedicated form-first Feedback workspace
+- Primary navigation: one compact top-level segmented control with `变动日志`, `本地 Archive`, `Agent 任务`, `技术问答`, and `大厅配置`; `反馈` is a persistent utility action immediately left of the theme switch
+- Core routes/screens: the existing workspaces, the independent Technical QA workspace, a dedicated form-first Feedback workspace, and a keep-alive Lobby Configuration workspace entered by selecting a Y3 source project root
 - Content hierarchy: module navigation first; the active workspace second; Feedback starts with type as the first question, then asks only for a title and one primary description before an optional progressive-disclosure section for diagnostics, contact, attachments, and disclosed metadata
 
 ## Design principles
@@ -32,6 +32,7 @@
 - Evidence stays inspectable: citations are adjacent to the answer and include authority, locator, and Y3 2.0 scope.
 - Bound the product: fixed Y3 2.0 scope and two domain modes are visible; forbidden project capabilities are absent, not merely disabled.
 - Keep Feedback distinct: reuse shell and narrow validation patterns, but never Technical QA conversation state, wording, history, or routes.
+- Constrain project writes: Lobby Configuration may read only the selected source project's metadata and lobby files, and may write only `match.json` and `dungeon.json` after validation, stale-revision checks, preview, backup warning, and explicit editor-closed confirmation.
 - Make privacy inspectable: show the exact bounded client metadata and attachment review warning before submission; collect no paths, project contents, credentials, or device fingerprint.
 - Minimize feedback effort: require only the information needed to understand the report; keep diagnostic structure available as optional progressive disclosure instead of presenting a long mandatory questionnaire.
 - Tradeoffs: prefer dense desktop ergonomics and clear boundaries over conversational ornament; collapse secondary history before compressing answer readability.
@@ -46,7 +47,7 @@
 
 ## Components
 - Existing components to reuse: app shell, Ant Design segmented controls, buttons, alerts, tooltips, tags, typography, and theme provider
-- New/changed components: Technical QA workspace components plus a Feedback workspace, Bug/Feature Request selector, structured field groups, Bug attachment picker/list, privacy disclosure strip, submit action, and acknowledgement state
+- New/changed components: Technical QA workspace components; Feedback workspace and its structured form controls; Lobby Configuration project picker, level/mode editor, presets, validation summary, JSON previews, and guarded save action
 - Variants and states: empty, ready, validating, uploading, submitting, success, rate-limited, unavailable, retryable error, and non-retryable validation error; Feedback success is acknowledgement-only and exposes no backend ID, Admin URL, status, or history affordance
 - Token/component ownership: global shell tokens stay in `src/App.css`; Technical QA styles stay in `src/technicalQa`; Feedback state, components, and styles stay in a separate `src/feedback` module
 
@@ -79,8 +80,8 @@
 - Framework/styling system: React 19, TypeScript, Ant Design 6, existing icon package, plain CSS
 - Design-token constraints: extend existing CSS variables and both tone scopes; do not add a new theme layer or dependency
 - Performance constraints: bounded polling, stable list keys, independent scroll regions, and no full-workspace rerender from each unrelated shell state change
-- Compatibility constraints: Electron and browser transports share public DTOs; QA and Feedback use separate route/header/IPC boundaries; existing module keep-alive semantics remain intact; cross-repository Feedback DTOs use schema-versioned independent definitions verified by deterministic fixtures
-- Test/screenshot expectations: unit tests cover transport/state/validation/render states; full type/lint/test/build gates; Feedback screenshots at desktop and narrow widths must show the form, privacy disclosure, attachment controls, errors, and actions without overlap or clipping
+- Compatibility constraints: Electron and browser transports share public DTOs; QA, Feedback, and Lobby Configuration use separate boundaries; existing module keep-alive semantics remain intact; Lobby Configuration uses dedicated IPC with an opened-project allowlist and exact 38-digit map ID handling; cross-repository Feedback DTOs use schema-versioned independent definitions verified by deterministic fixtures
+- Test/screenshot expectations: unit tests cover transport/state/validation/render states; Lobby Configuration tests cover model, validator, Electron file API, and workspace UI seams; full type/lint/test/build gates; Feedback and Lobby Configuration screenshots at desktop and narrow widths must show controls, errors, previews, and actions without overlap or clipping
 
 ## Open questions
 - [ ] None blocking Feedback V1; user-visible status tracking, replies, automatic diagnostics, and Admin mutations require separate product approval.

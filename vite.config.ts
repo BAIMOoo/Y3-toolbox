@@ -19,7 +19,23 @@ async function startElectronOnce({
   }
 
   hasStartedElectron = true
+  normalizeElectronDevServerUrl()
   await startup()
+}
+
+function normalizeElectronDevServerUrl() {
+  const configuredUrl = process.env.VITE_DEV_SERVER_URL
+  if (!configuredUrl) return
+
+  try {
+    const devServerUrl = new URL(configuredUrl)
+    if (devServerUrl.hostname === 'localhost') {
+      devServerUrl.hostname = '127.0.0.1'
+      process.env.VITE_DEV_SERVER_URL = devServerUrl.toString()
+    }
+  } catch {
+    // Let Electron report malformed URLs through its normal load failure path.
+  }
 }
 
 // https://vite.dev/config/

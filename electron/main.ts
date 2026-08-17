@@ -12,11 +12,25 @@ import {
 } from '../src/archiveViewer/archiveFileContract';
 import { findStartupOpenPath, type StartupOpenPathKind } from './startupOpenPath';
 import { resolveSafeAgentArtifactDownloadRequest } from './agentArtifactDownload';
+import {
+  LobbyProjectConflictError,
+  LobbyProjectUserError,
+  lobbyProjectErrorMessage,
+  readLobbyProject,
+  saveLobbyProject,
+} from './lobbyConfigFiles';
+import type { SaveLobbyConfigRequest } from '../src/lobbyConfig/contracts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BUILD_AGENT_RUNNER_URL = typeof __AGENT_RUNNER_URL__ === 'string' ? __AGENT_RUNNER_URL__ : '';
+const DEV_SERVER_PROBE_ATTEMPTS = 15;
+const DEV_SERVER_PROBE_INTERVAL_MS = 200;
+const DEV_RENDERER_INITIAL_TIMEOUT_MS = 3_000;
+const DEV_RENDERER_RECOVERY_TIMEOUT_MS = 120_000;
+const DEV_RENDERER_FINAL_TIMEOUT_MS = 30_000;
+const DEV_RENDERER_POLL_INTERVAL_MS = 250;
 
 function getConfiguredAgentRunnerUrl(): string {
   const configuredUrl = process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL;
@@ -35,7 +49,8 @@ function isSafeExternalHttpUrl(value: string): boolean {
 }
 
 function isInternalAppHttpUrl(url: URL): boolean {
-  return (url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port === '5174';
+  return (url.hostname === '127.0.0.1' || url.hostname === 'localhost')
+    && (url.port === '5174' || url.port === '5178');
 }
 
 function createAgentArtifactDownloadId(): string {
@@ -50,14 +65,18 @@ function getAgentArtifactDownloadFilename(request: unknown, url: URL): string {
 }
 
 let mainWindow: BrowserWindow | null = null;
+const selectedLobbyProjects = new Set<string>();
+const openedLobbyProjects = new Set<string>();
 
 async function createWindow() {
   Menu.setApplicationMenu(null);
+  const devServerUrl = await resolveDevServerUrl();
 
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     backgroundColor: '#090b10',
+    show: false,
     autoHideMenuBar: true,
     frame: false,
     webPreferences: {
@@ -70,7 +89,6 @@ async function createWindow() {
   // 开发环境加载 Vite dev server，生产环境加载打包后的 HTML。
   // WSL 启动 Windows electron.exe 时，VITE_DEV_SERVER_URL 有时不会进入 Electron 主进程；
   // 因此开发模式下额外探测默认 Vite 地址，避免加载 stale dist/index.html。
-  const devServerUrl = await resolveDevServerUrl();
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isSafeExternalHttpUrl(url)) {
       void shell.openExternal(url);
@@ -85,11 +103,11 @@ async function createWindow() {
   });
 
   if (devServerUrl) {
-    await mainWindow.webContents.session.clearCache();
-    mainWindow.loadURL(withDevCacheBust(devServerUrl));
+    await loadDevelopmentWindow(mainWindow, devServerUrl);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    await mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+  mainWindow.show();
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     const key = input.key.toLowerCase();
@@ -167,6 +185,18 @@ ipcMain.handle('dialog:openArchiveDirectory', async () => {
   });
   if (result.canceled) return null;
   return result.filePaths[0];
+});
+
+ipcMain.handle('dialog:openLobbyConfigDirectory', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择 Y3 源码项目',
+    properties: ['openDirectory'],
+  });
+  if (result.canceled) return null;
+  const projectPath = result.filePaths[0];
+  selectedLobbyProjects.add(lobbyProjectKey(projectPath));
+  return projectPath;
 });
 
 // IPC: kkres 图片输入：选择一个图片文件夹
@@ -296,6 +326,40 @@ ipcMain.handle('fs:readFile', async (_event, filePath: string) => {
   }
 });
 
+ipcMain.handle('lobby-config:readProject', async (_event, projectPath: unknown) => {
+  try {
+    if (typeof projectPath !== 'string' || !projectPath.trim()) throw new LobbyProjectUserError('请选择 Y3 源码项目');
+    if (!selectedLobbyProjects.has(lobbyProjectKey(projectPath))) {
+      throw new LobbyProjectUserError('请先通过目录选择器选择 Y3 源码项目');
+    }
+    const snapshot = await readLobbyProject(projectPath);
+    openedLobbyProjects.add(lobbyProjectKey(snapshot.projectPath));
+    return { success: true, snapshot };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: lobbyProjectErrorMessage(err, '读取大厅配置失败，请确认项目文件可访问后重试'),
+    };
+  }
+});
+
+ipcMain.handle('lobby-config:saveProject', async (_event, request: unknown) => {
+  try {
+    const parsed = parseSaveLobbyProjectRequest(request);
+    if (!openedLobbyProjects.has(lobbyProjectKey(parsed.projectPath))) {
+      throw new LobbyProjectUserError('请先通过大厅配置工具打开该项目');
+    }
+    const revisions = await saveLobbyProject(parsed);
+    return { success: true, revisions };
+  } catch (err: unknown) {
+    return {
+      success: false,
+      code: err instanceof LobbyProjectConflictError ? 'conflict' : 'save-failed',
+      error: lobbyProjectErrorMessage(err, '保存大厅配置失败，请确认项目文件可写且 Y3 编辑器已关闭'),
+    };
+  }
+});
+
 
 // IPC: Task-service JSON proxy. Packaged Electron loads from file://, so renderer fetches to
 // a local or configured HTTP service can be CORS-blocked; keep the bridge narrow and pinned.
@@ -381,21 +445,78 @@ app.on('activate', () => {
 
 
 async function resolveDevServerUrl(): Promise<string | null> {
-  if (process.env.VITE_DEV_SERVER_URL) return process.env.VITE_DEV_SERVER_URL;
+  if (process.env.VITE_DEV_SERVER_URL) return normalizeLocalDevServerUrl(process.env.VITE_DEV_SERVER_URL);
   if (app.isPackaged) return null;
 
   const fallbackUrls = [
-    // Only probe the isolated dev frontend port. Port 5173 may belong to the
+    // Only probe isolated dev frontend ports. Port 5173 may belong to the
     // public-runtime service and can otherwise make local Electron load stale UI.
+    'http://127.0.0.1:5178/',
     'http://127.0.0.1:5174/',
-    'http://localhost:5174/',
   ];
 
-  for (const fallbackUrl of fallbackUrls) {
-    if (await canReachUrl(fallbackUrl)) return fallbackUrl;
+  for (let attempt = 0; attempt < DEV_SERVER_PROBE_ATTEMPTS; attempt += 1) {
+    for (const fallbackUrl of fallbackUrls) {
+      if (await canReachUrl(fallbackUrl)) return fallbackUrl;
+    }
+    if (attempt + 1 < DEV_SERVER_PROBE_ATTEMPTS) {
+      await new Promise<void>((resolve) => setTimeout(resolve, DEV_SERVER_PROBE_INTERVAL_MS));
+    }
   }
 
   return null;
+}
+
+function normalizeLocalDevServerUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.hostname === 'localhost' && (url.port === '5174' || url.port === '5178')) {
+      url.hostname = '127.0.0.1';
+    }
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
+async function loadDevelopmentWindow(window: BrowserWindow, devServerUrl: string): Promise<void> {
+  await window.webContents.session.clearCache();
+  await window.loadURL(withDevCacheBust(devServerUrl)).catch(() => undefined);
+  if (await waitForRendererContent(window, DEV_RENDERER_INITIAL_TIMEOUT_MS)) return;
+
+  if (await waitForReachableUrl(devServerUrl, DEV_RENDERER_RECOVERY_TIMEOUT_MS)) {
+    await window.loadURL(withDevCacheBust(devServerUrl)).catch(() => undefined);
+    await waitForRendererContent(window, DEV_RENDERER_FINAL_TIMEOUT_MS);
+  }
+}
+
+async function waitForRendererContent(window: BrowserWindow, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline && !window.isDestroyed()) {
+    try {
+      const isReady = await window.webContents.executeJavaScript(
+        "Boolean(document.querySelector('#root')?.childElementCount)",
+      ) as boolean;
+      if (isReady) return true;
+    } catch {
+      // The renderer can be unavailable while Vite is compiling or reloading.
+    }
+    await delay(DEV_RENDERER_POLL_INTERVAL_MS);
+  }
+  return false;
+}
+
+async function waitForReachableUrl(url: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await canReachUrl(url)) return true;
+    await delay(DEV_RENDERER_POLL_INTERVAL_MS);
+  }
+  return false;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 
@@ -744,6 +865,29 @@ function isPlayerArchiveData(data: unknown): boolean {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseSaveLobbyProjectRequest(value: unknown): SaveLobbyConfigRequest {
+  if (!isPlainObject(value)
+    || typeof value.projectPath !== 'string'
+    || (value.matchRevision !== null && typeof value.matchRevision !== 'string')
+    || (value.dungeonRevision !== null && typeof value.dungeonRevision !== 'string')
+    || typeof value.matchJson !== 'string'
+    || typeof value.dungeonJson !== 'string') {
+    throw new LobbyProjectUserError('大厅配置保存请求无效');
+  }
+  return {
+    projectPath: value.projectPath,
+    matchRevision: value.matchRevision,
+    dungeonRevision: value.dungeonRevision,
+    matchJson: value.matchJson,
+    dungeonJson: value.dungeonJson,
+  };
+}
+
+function lobbyProjectKey(projectPath: string): string {
+  const normalized = path.normalize(path.resolve(projectPath));
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
 function isMissingFileError(err: unknown): boolean {

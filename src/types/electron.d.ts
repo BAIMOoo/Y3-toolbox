@@ -1,3 +1,9 @@
+import type {
+  LobbyConfigRevisions,
+  LobbyProjectSnapshot,
+  SaveLobbyConfigRequest,
+} from '../lobbyConfig/contracts';
+
 export type KkresImageStagePhase = 'collecting' | 'uploading' | 'complete' | 'failed';
 
 export interface KkresImageStageProgress {
@@ -68,6 +74,15 @@ export interface ElectronAPI {
       title: string;
     }
     | { success: false; error: string }
+  >;
+  openLobbyConfigDirectory?: () => Promise<string | null>;
+  readLobbyConfigProject?: (projectPath: string) => Promise<
+    | { success: true; snapshot: LobbyProjectSnapshot }
+    | { success: false; error: string }
+  >;
+  saveLobbyConfigProject?: (request: SaveLobbyConfigRequest) => Promise<
+    | { success: true; revisions: LobbyConfigRevisions }
+    | { success: false; code: 'conflict' | 'save-failed'; error: string }
   >;
   minimizeWindow: () => Promise<void>;
   toggleMaximizeWindow: () => Promise<boolean>;

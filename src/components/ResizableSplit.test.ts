@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { clampSplitRatio, nextKeyboardSplitRatio } from './resizableSplitMath';
 import { ResizableSplit } from './ResizableSplit';
@@ -46,6 +46,49 @@ describe('ResizableSplit keyboard ratio helpers', () => {
 
     fireEvent.keyDown(separator, { key: 'Home' });
     expect(separator.getAttribute('aria-valuenow')).toBe('20');
+  });
+
+  it('supports a specific separator label and pane overflow strategy', () => {
+    render(React.createElement(ResizableSplit, {
+      left: React.createElement('div', null, 'left'),
+      right: React.createElement('div', null, 'right'),
+      separatorLabel: '调整检查面板宽度',
+      paneOverflow: 'hidden',
+      className: 'test-split',
+    }));
+
+    expect(screen.getByRole('separator', { name: '调整检查面板宽度' })).toBeTruthy();
+    expect(document.querySelector('.resizable-split.test-split')).toBeTruthy();
+    expect(document.querySelector('.resizable-split-pane--left')).toHaveStyle({ overflow: 'hidden' });
+  });
+
+  it('updates the split ratio while dragging the separator', () => {
+    render(React.createElement(ResizableSplit, {
+      left: React.createElement('div', null, 'left'),
+      right: React.createElement('div', null, 'right'),
+      defaultRatio: 0.4,
+    }));
+
+    const split = document.querySelector('.resizable-split');
+    if (!(split instanceof HTMLDivElement)) throw new Error('Resizable split was not rendered');
+    vi.spyOn(split, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      right: 1000,
+      top: 0,
+      bottom: 600,
+      width: 1000,
+      height: 600,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    const separator = screen.getByRole('separator', { name: /拖拽调整面板大小/ });
+
+    fireEvent.mouseDown(separator);
+    fireEvent.mouseMove(document, { clientX: 600 });
+    fireEvent.mouseUp(document);
+
+    expect(separator).toHaveAttribute('aria-valuenow', '60');
   });
 
   it('restores global drag styles when unmounted mid-drag', () => {

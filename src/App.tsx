@@ -1,6 +1,6 @@
 // src/App.tsx
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { ConfigProvider, theme, Alert, Button, Segmented } from 'antd';
+import { ConfigProvider, theme, Alert, Button, Modal, Segmented } from 'antd';
 import type { ThemeConfig } from 'antd';
 import { MessageOutlined, MoonOutlined, SunOutlined } from '@ant-design/icons';
 import './App.css';
@@ -17,6 +17,7 @@ import { LocalArchiveViewer, type LocalArchiveInitialOpen } from './archiveViewe
 import { AgentJobCenter } from './agentJobs/AgentJobCenter';
 import { TechnicalQaWorkspace } from './technicalQa/TechnicalQaWorkspace';
 import { FeedbackWorkspace } from './feedback/FeedbackWorkspace';
+import { LobbyConfigWorkspace } from './lobbyConfig/LobbyConfigWorkspace';
 import { classifyOpenFilePath, classifyLocalInput, getDroppedLocalInputs, routeRequiresLocalArchive, shouldSkipRootDropRoute, type OpenFileRoute } from './utils/openFileRouting';
 import { shouldShowDiffContextToolbar } from './utils/diffUiState';
 import { RecoveryPanel } from './recovery/RecoveryPanel';
@@ -59,7 +60,7 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-type AppMode = 'diff' | 'local-archive' | 'agent-jobs' | 'technical-qa' | 'feedback';
+type AppMode = 'diff' | 'local-archive' | 'agent-jobs' | 'technical-qa' | 'lobby-config' | 'feedback';
 type DiffWorkspaceMode = 'compare' | 'recovery';
 type UiTone = 'graphite' | 'paper';
 
@@ -132,6 +133,8 @@ function App() {
   const [uiTone, setUiTone] = useState<UiTone>(readInitialUiTone);
   const [pendingArchiveOpen, setPendingArchiveOpen] = useState<LocalArchiveInitialOpen | null>(null);
   const [shellError, setShellError] = useState<string | null>(null);
+  const [lobbyConfigDirty, setLobbyConfigDirty] = useState(false);
+  const allowLobbyConfigCloseRef = useRef(false);
   const openEventIdRef = useRef(0);
   const diffOpenRequestIdRef = useRef(0);
   const {
@@ -160,6 +163,17 @@ function App() {
 
   const [highlightKey, setHighlightKey] = useState<string | null>(null);
   const [diffWorkspaceMode, setDiffWorkspaceMode] = useState<DiffWorkspaceMode>('compare');
+
+  useEffect(() => {
+    if (!lobbyConfigDirty) allowLobbyConfigCloseRef.current = false;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!lobbyConfigDirty || allowLobbyConfigCloseRef.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [lobbyConfigDirty]);
 
   const currentTimePoint = useMemo(() => {
     return timePoints[selectedIndex] ?? null;
@@ -357,6 +371,7 @@ function App() {
                 { label: '本地 Archive', value: 'local-archive' },
                 { label: 'Agent 任务', value: 'agent-jobs' },
                 { label: '技术问答', value: 'technical-qa' },
+                { label: '大厅配置', value: 'lobby-config' },
               ]}
             />
           </div>
@@ -382,7 +397,29 @@ function App() {
           <div className="app-window-controls" aria-label="窗口控制" title={window.electronAPI ? 'Electron window controls' : 'Electron API 未注入'}>
             <button type="button" className="app-window-button" aria-label="最小化" disabled={!window.electronAPI} onClick={() => void window.electronAPI?.minimizeWindow()}>—</button>
             <button type="button" className="app-window-button" aria-label="最大化或还原" disabled={!window.electronAPI} onClick={() => void window.electronAPI?.toggleMaximizeWindow()}>□</button>
-            <button type="button" className="app-window-button app-window-button--close" aria-label="关闭" disabled={!window.electronAPI} onClick={() => void window.electronAPI?.closeWindow()}>×</button>
+            <button
+              type="button"
+              className="app-window-button app-window-button--close"
+              aria-label="关闭"
+              disabled={!window.electronAPI}
+              onClick={() => {
+                if (!lobbyConfigDirty) {
+                  void window.electronAPI?.closeWindow();
+                  return;
+                }
+                Modal.confirm({
+                  title: '关闭并放弃未保存配置？',
+                  content: '大厅配置中的修改尚未写入项目。',
+                  okText: '放弃并关闭',
+                  cancelText: '继续编辑',
+                  okButtonProps: { danger: true },
+                  onOk: () => {
+                    allowLobbyConfigCloseRef.current = true;
+                    return window.electronAPI?.closeWindow();
+                  },
+                });
+              }}
+            >×</button>
           </div>
         </header>
         {shellError && <Alert message={shellError} type="error" closable onClose={() => setShellError(null)} style={{ margin: '8px 16px 0' }} />}
@@ -405,7 +442,15 @@ function App() {
             aria-hidden={mode !== 'feedback'}
             className="feedback-shell"
           >
-            <FeedbackWorkspace activeModule={mode} />
+            <FeedbackWorkspace activeModule={mode === 'lobby-config' ? 'feedback' : mode} />
+          </section>
+          <section
+            data-testid="lobby-config-shell"
+            hidden={mode !== 'lobby-config'}
+            aria-hidden={mode !== 'lobby-config'}
+            className="lobby-config-shell"
+          >
+            <LobbyConfigWorkspace onDirtyChange={setLobbyConfigDirty} />
           </section>
           <section
             data-testid="diff-workspace"

@@ -16,6 +16,9 @@ const downloadCleanCsv = vi.fn();
 const timelineMounts = vi.fn();
 const technicalQaMounts = vi.fn();
 const feedbackMounts = vi.fn();
+const lobbyConfigMounts = vi.fn();
+const modalConfirm = vi.fn();
+const closeWindow = vi.fn().mockResolvedValue(undefined);
 
 const loadedTimePoints: TimePoint[] = [
   { index: 0, timestamp: new Date('2026-03-20T10:00:00'), changes: [{ key: '100-1', keyParts: ['100', '1'], rootKey: '100', oldValue: 'nil', newValue: '1', changeType: 'create' }] },
@@ -44,6 +47,7 @@ vi.mock('antd', () => ({
     )))
   ),
   Button: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => React.createElement('button', { type: 'button', onClick }, children),
+  Modal: { confirm: modalConfirm },
   theme: { darkAlgorithm: {}, defaultAlgorithm: {} },
 }));
 
@@ -153,6 +157,20 @@ vi.mock('./feedback/FeedbackWorkspace', () => ({
   },
 }));
 
+vi.mock('./lobbyConfig/LobbyConfigWorkspace', () => ({
+  LobbyConfigWorkspace: ({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) => {
+    useEffect(() => {
+      lobbyConfigMounts();
+    }, []);
+    return React.createElement(
+      'section',
+      { 'data-testid': 'lobby-config-workspace' },
+      React.createElement('input', { 'aria-label': 'lobby config draft' }),
+      React.createElement('button', { type: 'button', onClick: () => onDirtyChange?.(true) }, 'mark lobby dirty'),
+    );
+  },
+}));
+
 vi.mock('./recovery/RecoveryPanel', () => ({
   RecoveryPanel: () => React.createElement('section', { 'data-testid': 'recovery-panel' }, 'recovery'),
 }));
@@ -161,6 +179,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   window.localStorage.clear();
+  delete window.electronAPI;
 });
 
 describe('App workspace keep-alive behavior', () => {
@@ -180,6 +199,18 @@ describe('App workspace keep-alive behavior', () => {
     const initialFeedbackShell = screen.getByTestId('feedback-shell');
     expect(initialFeedbackShell.hasAttribute('hidden')).toBe(true);
     expect(feedbackMounts).toHaveBeenCalledTimes(1);
+    const initialLobbyConfigShell = screen.getByTestId('lobby-config-shell');
+    expect(initialLobbyConfigShell.hasAttribute('hidden')).toBe(true);
+    expect(lobbyConfigMounts).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '大厅配置' }));
+    expect(initialLobbyConfigShell.hasAttribute('hidden')).toBe(false);
+    const lobbyDraft = screen.getByRole('textbox', { name: 'lobby config draft' }) as HTMLInputElement;
+    fireEvent.change(lobbyDraft, { target: { value: 'persistent lobby config' } });
+    fireEvent.click(screen.getByRole('button', { name: '变动日志' }));
+    fireEvent.click(screen.getByRole('button', { name: '大厅配置' }));
+    expect((screen.getByRole('textbox', { name: 'lobby config draft' }) as HTMLInputElement).value).toBe('persistent lobby config');
+    expect(lobbyConfigMounts).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: '本地 Archive' }));
 
@@ -236,5 +267,27 @@ describe('App workspace keep-alive behavior', () => {
     expect(timelineMounts).toHaveBeenCalledTimes(1);
     expect(loadFile).not.toHaveBeenCalled();
     expect(loadFromText).not.toHaveBeenCalled();
-  });
+  }, 15_000);
+
+  it('allows the confirmed discard action to pass the unload guard', async () => {
+    window.electronAPI = { closeWindow } as unknown as Window['electronAPI'];
+    const { default: App } = await import('./App');
+    render(React.createElement(App));
+
+    fireEvent.click(screen.getByRole('button', { name: '大厅配置' }));
+    fireEvent.click(screen.getByRole('button', { name: 'mark lobby dirty' }));
+    const blockedUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(blockedUnload);
+    expect(blockedUnload.defaultPrevented).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+    expect(modalConfirm).toHaveBeenCalledTimes(1);
+    const options = modalConfirm.mock.calls[0][0] as { onOk: () => Promise<void> | void };
+    await options.onOk();
+    expect(closeWindow).toHaveBeenCalledTimes(1);
+
+    const confirmedUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(confirmedUnload);
+    expect(confirmedUnload.defaultPrevented).toBe(false);
+  }, 15_000);
 });

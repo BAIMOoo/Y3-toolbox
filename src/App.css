@@ -325,7 +325,8 @@ body {
   display: none;
 }
 
-.feedback-shell {
+.feedback-shell,
+.lobby-config-shell {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -333,7 +334,8 @@ body {
   min-height: 0;
 }
 
-.feedback-shell[hidden] {
+.feedback-shell[hidden],
+.lobby-config-shell[hidden] {
   display: none;
 }
 
@@ -350,6 +352,10 @@ body {
 }
 
 .app-content--feedback {
+  overflow: hidden;
+}
+
+.app-content--lobby-config {
   overflow: hidden;
 }
 

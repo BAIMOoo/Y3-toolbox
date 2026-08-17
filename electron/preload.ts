@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { SaveLobbyConfigRequest } from '../src/lobbyConfig/contracts';
 
 const BUILD_AGENT_RUNNER_URL = typeof __AGENT_RUNNER_URL__ === 'string' ? __AGENT_RUNNER_URL__ : '';
 
@@ -19,6 +20,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openArchiveFileDialog: () => ipcRenderer.invoke('dialog:openArchiveFile'),
   openArchiveDirectoryDialog: () => ipcRenderer.invoke('dialog:openArchiveDirectory'),
   readArchiveInput: (inputPath: string) => ipcRenderer.invoke('archive:readInput', inputPath),
+
+  openLobbyConfigDirectory: () => ipcRenderer.invoke('dialog:openLobbyConfigDirectory'),
+  readLobbyConfigProject: (projectPath: string) => ipcRenderer.invoke('lobby-config:readProject', projectPath),
+  saveLobbyConfigProject: (request: SaveLobbyConfigRequest) => ipcRenderer.invoke('lobby-config:saveProject', request),
 
   // kkres 图片输入辅助
   openKkresImageDirectoryDialog: () => ipcRenderer.invoke('dialog:openKkresImageDirectory'),

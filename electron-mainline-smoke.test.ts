@@ -21,6 +21,7 @@ describe('Electron mainline static smoke coverage', () => {
     expect(viteConfig).toContain("entry: 'electron/main.ts'");
     expect(viteConfig).toContain("entry: 'electron/preload.ts'");
     expect(viteConfig).toContain('vite-plugin-electron-renderer');
+    expect(viteConfig).toContain("devServerUrl.hostname = '127.0.0.1'");
   });
 
   it('keeps local input IPC wired without weakening preload isolation', () => {
@@ -34,12 +35,22 @@ describe('Electron mainline static smoke coverage', () => {
     expect(main).toContain("ipcMain.handle('dialog:openArchiveDirectory'");
     expect(main).toContain("ipcMain.handle('dialog:openKkresImageDirectory'");
     expect(main).toContain("ipcMain.handle('dialog:openKkresImageFiles'");
+    expect(main).toContain("ipcMain.handle('dialog:openLobbyConfigDirectory'");
+    expect(main).toContain("ipcMain.handle('lobby-config:readProject'");
+    expect(main).toContain("ipcMain.handle('lobby-config:saveProject'");
+    expect(main).toContain('selectedLobbyProjects.add(lobbyProjectKey(projectPath))');
+    expect(main).toContain('selectedLobbyProjects.has(lobbyProjectKey(projectPath))');
+    expect(main).toContain('openedLobbyProjects.has(lobbyProjectKey(parsed.projectPath))');
 
     expect(preload).toContain("contextBridge.exposeInMainWorld('electronAPI'");
     expect(preload).toContain("openKkresImageDirectoryDialog: () => ipcRenderer.invoke('dialog:openKkresImageDirectory')");
     expect(preload).toContain("openKkresImageFilesDialog: () => ipcRenderer.invoke('dialog:openKkresImageFiles')");
     expect(preload).toContain("readFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath)");
     expect(preload).toContain("readArchiveInput: (inputPath: string) => ipcRenderer.invoke('archive:readInput', inputPath)");
+    expect(preload).toContain("openLobbyConfigDirectory: () => ipcRenderer.invoke('dialog:openLobbyConfigDirectory')");
+    expect(preload).toContain("readLobbyConfigProject: (projectPath: string) => ipcRenderer.invoke('lobby-config:readProject', projectPath)");
+    expect(preload).toContain("saveLobbyConfigProject: (request:");
+    expect(preload).toContain("ipcRenderer.invoke('lobby-config:saveProject', request)");
   });
 
 
@@ -54,6 +65,19 @@ describe('Electron mainline static smoke coverage', () => {
     expect(main).toContain("mainWindow.webContents.on('will-navigate'");
     expect(main).toContain('isInternalAppHttpUrl');
     expect(main).toContain("url.port === '5174'");
+    expect(main).toContain("url.port === '5178'");
+    expect(main).toContain('DEV_SERVER_PROBE_ATTEMPTS');
+    expect(main).toContain('attempt < DEV_SERVER_PROBE_ATTEMPTS');
+    expect(main).toContain("url.hostname = '127.0.0.1'");
+  });
+
+  it('keeps the development window hidden until renderer content is ready', () => {
+    const main = read('electron/main.ts');
+
+    expect(main).toContain('show: false');
+    expect(main).toContain('waitForRendererContent');
+    expect(main).toContain('await loadDevelopmentWindow(mainWindow, devServerUrl)');
+    expect(main).toContain('mainWindow.show()');
   });
 
   it('shares local input extension rules between renderer routing and Electron archive validation', () => {

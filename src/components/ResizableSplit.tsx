@@ -8,6 +8,9 @@ interface ResizableSplitProps {
   defaultRatio?: number;
   minRatio?: number;
   maxRatio?: number;
+  className?: string;
+  separatorLabel?: string;
+  paneOverflow?: React.CSSProperties['overflow'];
 }
 
 
@@ -17,6 +20,9 @@ export const ResizableSplit: React.FC<ResizableSplitProps> = ({
   defaultRatio = 0.4,
   minRatio = 0.2,
   maxRatio = 0.8,
+  className,
+  separatorLabel = '拖拽调整面板大小',
+  paneOverflow = 'auto',
 }) => {
   const [ratio, setRatio] = useState(defaultRatio);
   const [handleActive, setHandleActive] = useState(false);
@@ -110,14 +116,23 @@ export const ResizableSplit: React.FC<ResizableSplitProps> = ({
   useEffect(() => cleanupDragSideEffects, [cleanupDragSideEffects]);
 
   return (
-    <div ref={containerRef} style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-      <div style={{ width: `${ratio * 100}%`, overflow: 'auto' }}>{left}</div>
+    <div
+      ref={containerRef}
+      className={`resizable-split${className ? ` ${className}` : ''}`}
+      style={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0, height: '100%', overflow: 'hidden' }}
+    >
+      <div
+        className="resizable-split-pane resizable-split-pane--left"
+        style={{ width: `${ratio * 100}%`, minWidth: 0, minHeight: 0, overflow: paneOverflow }}
+      >
+        {left}
+      </div>
       <div
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         role="separator"
         aria-orientation="vertical"
-        aria-label="拖拽调整面板大小"
+        aria-label={separatorLabel}
         aria-valuemin={Math.round(minRatio * 100)}
         aria-valuemax={Math.round(maxRatio * 100)}
         aria-valuenow={Math.round(ratio * 100)}
@@ -176,7 +191,12 @@ export const ResizableSplit: React.FC<ResizableSplitProps> = ({
           ))}
         </div>
       </div>
-      <div style={{ flex: 1, overflow: 'auto' }}>{right}</div>
+      <div
+        className="resizable-split-pane resizable-split-pane--right"
+        style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: paneOverflow }}
+      >
+        {right}
+      </div>
     </div>
   );
 };
