@@ -587,7 +587,7 @@ describe('TechnicalQaController', () => {
 
     await controller.submit();
 
-    expect(sleepDurations).toEqual([750, 1500, 3000, 6000, 12000, 15000, 15000, 750, 750]);
+    expect(sleepDurations).toEqual([250, 500, 1000, 2000, 4000, 8000, 15000, 250, 250]);
     expect(activeTurn(controller).state.status).toBe('answer');
   });
 

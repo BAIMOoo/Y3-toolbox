@@ -134,13 +134,18 @@ describe('TechnicalQaWorkspaceView', () => {
     expect(screen.getByText('正在生成的回答')).toBeTruthy();
     expect(screen.getByText('使用触发器事件。')).toBeTruthy();
     expect(screen.getByText('证据充分')).toBeTruthy();
-    expect(screen.getByRole('region', { name: '引用来源' })).toBeTruthy();
+    const citationRegion = screen.getByRole('region', { name: '引用来源' });
+    const citationList = citationRegion.querySelector('.technical-qa__citation-list') as HTMLDetailsElement;
+    expect(citationList.open).toBe(false);
+    expect(screen.getByText('1 项')).toBeTruthy();
+    fireEvent.click(screen.getByText('引用来源'));
+    expect(citationList.open).toBe(true);
     expect(screen.getByText('Y3 Editor 2.0 Trigger Documentation')).toBeTruthy();
     expect(screen.getByText('官方')).toBeTruthy();
     expect(screen.getByText('Triggers > Events')).toBeTruthy();
   });
 
-  it('renders v2 support segments in answer order with inference and unavailable-source notices outside plain answer', () => {
+  it('hides internal v2 support segments while rendering unavailable-source notices outside plain answer', () => {
     const answerV2 = completedOutcome(QA_CLIENT_EVENT_FIXTURES.answerV2);
     renderWorkspace(stateWith([
       thread('thread-v2', [turn('q-v2', terminalState(answerV2))], 'v2 会话'),
@@ -151,8 +156,9 @@ describe('TechnicalQaWorkspaceView', () => {
     );
     expect(plainAnswer).toBeTruthy();
     expect(plainAnswer.textContent).not.toMatch(/来源支持|推断|知识不可用|来源不可用/);
-    expect(screen.getByText('来源支持')).toBeTruthy();
-    expect(screen.getByText('推断')).toBeTruthy();
+    expect(screen.queryByText('来源支持')).toBeNull();
+    expect(screen.queryByText('推断')).toBeNull();
+    expect(document.querySelector('.technical-qa__support-segments')).toBeNull();
     expect(screen.getByText('知识不可用')).toBeTruthy();
     expect(screen.getByText('来源不可用')).toBeTruthy();
     expect(screen.getByText('y3-lualib Timer API')).toBeTruthy();

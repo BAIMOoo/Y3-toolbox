@@ -93,7 +93,7 @@ interface PendingSubmitAttempt {
   clientRequestId: string;
 }
 
-const DEFAULT_POLL_INTERVAL_MS = 750;
+const DEFAULT_POLL_INTERVAL_MS = 250;
 const DEFAULT_MAX_POLL_BACKOFF_MS = 15_000;
 const PENDING_TURN_STORAGE_KEY = 'technicalQa.pendingTurn.v1';
 const GENERIC_UNAVAILABLE_MESSAGE = 'Technical QA service is currently unavailable.';

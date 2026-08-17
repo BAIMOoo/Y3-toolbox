@@ -20,7 +20,6 @@ import type {
 import { useTechnicalQaController } from './useTechnicalQaController';
 import type {
   QaAnswerNotice,
-  QaAnswerSupportSegment,
   QaCitation,
   QaDomain,
   QaEvidenceState,
@@ -56,18 +55,6 @@ const EVIDENCE_STATE_COLORS: Record<QaEvidenceState, 'success' | 'gold' | 'error
   sufficient: 'success',
   insufficient: 'gold',
   conflicting: 'error',
-};
-
-const SUPPORT_BASIS_LABELS: Record<QaAnswerSupportSegment['basis'], string> = {
-  conversation: '对话上下文',
-  grounded: '来源支持',
-  inference: '推断',
-};
-
-const SUPPORT_BASIS_COLORS: Record<QaAnswerSupportSegment['basis'], 'default' | 'blue' | 'purple'> = {
-  conversation: 'default',
-  grounded: 'blue',
-  inference: 'purple',
 };
 
 const NOTICE_LABELS: Record<QaAnswerNotice['kind'], string> = {
@@ -455,16 +442,6 @@ function AnswerContent({ outcome }: { outcome: Extract<QaTerminalOutcome, { kind
   return (
     <div className="technical-qa__answer-stack">
       <p className="technical-qa__answer">{outcome.answer}</p>
-      {outcome.supportSegments.length > 0 && (
-        <ol className="technical-qa__support-segments" aria-label="答案依据片段">
-          {outcome.supportSegments.map((segment, index) => (
-            <li key={`${index}-${segment.basis}`}>
-              <Tag color={SUPPORT_BASIS_COLORS[segment.basis]}>{SUPPORT_BASIS_LABELS[segment.basis]}</Tag>
-              <span>{segment.text}</span>
-            </li>
-          ))}
-        </ol>
-      )}
       {outcome.notices.length > 0 && (
         <ul className="technical-qa__answer-notices" aria-label="答案可用性提示">
           {outcome.notices.map((notice, index) => (
@@ -481,26 +458,31 @@ function AnswerContent({ outcome }: { outcome: Extract<QaTerminalOutcome, { kind
 function CitationList({ citations }: { citations: QaCitation[] }) {
   return (
     <section className="technical-qa__citations" aria-label="引用来源">
-      <h3>引用来源</h3>
-      <ol>
-        {citations.map((citation) => (
-          <li key={citation.citationId}>
-            <details>
-              <summary>
-                <span>{citation.title}</span>
-                <Tag color={getAuthorityColor(citation.authority)}>
-                  {AUTHORITY_LABELS[citation.authority]}
-                </Tag>
-              </summary>
-              <div className="technical-qa__citation-detail">
-                <code>{citation.locator}</code>
-                <span>{citation.versionScope}</span>
-                {citation.excerpt && <blockquote>{citation.excerpt}</blockquote>}
-              </div>
-            </details>
-          </li>
-        ))}
-      </ol>
+      <details className="technical-qa__citation-list">
+        <summary className="technical-qa__citation-list-summary">
+          <span>引用来源</span>
+          <span className="technical-qa__citation-count">{citations.length} 项</span>
+        </summary>
+        <ol>
+          {citations.map((citation) => (
+            <li key={citation.citationId}>
+              <details className="technical-qa__citation-item">
+                <summary>
+                  <span>{citation.title}</span>
+                  <Tag color={getAuthorityColor(citation.authority)}>
+                    {AUTHORITY_LABELS[citation.authority]}
+                  </Tag>
+                </summary>
+                <div className="technical-qa__citation-detail">
+                  <code>{citation.locator}</code>
+                  <span>{citation.versionScope}</span>
+                  {citation.excerpt && <blockquote>{citation.excerpt}</blockquote>}
+                </div>
+              </details>
+            </li>
+          ))}
+        </ol>
+      </details>
     </section>
   );
 }
