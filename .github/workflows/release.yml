@@ -61,6 +61,7 @@ jobs:
         run: npm run build:electron -- --publish never
         env:
           VITE_AGENT_RUNNER_URL: https://y3toolbox.b4im.com
+          VITE_TECHNICAL_QA_ENABLED: '0'
 
       - name: Generate release train manifest
         shell: pwsh

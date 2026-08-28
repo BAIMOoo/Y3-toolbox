@@ -50,6 +50,7 @@ function readPackageVersion() {
 
 const y3ToolboxVersion = readPackageVersion()
 const agentRunnerUrl = process.env.VITE_AGENT_RUNNER_URL || ''
+const technicalQaEnabled = process.env.VITE_TECHNICAL_QA_ENABLED === '1'
 const agentServiceProxyTarget = process.env.AGENT_SERVICE_PROXY_TARGET
   || process.env.AGENT_RUNNER_PROXY_TARGET
   || process.env.AGENT_RUNNER_URL
@@ -59,6 +60,7 @@ export default defineConfig({
   define: {
     __AGENT_RUNNER_URL__: JSON.stringify(agentRunnerUrl),
     __Y3_TOOLBOX_VERSION__: JSON.stringify(y3ToolboxVersion),
+    __TECHNICAL_QA_ENABLED__: JSON.stringify(technicalQaEnabled),
   },
   base: './', // Electron 需要相对路径
   server: {
@@ -81,6 +83,7 @@ export default defineConfig({
           define: {
             __AGENT_RUNNER_URL__: JSON.stringify(agentRunnerUrl),
             __Y3_TOOLBOX_VERSION__: JSON.stringify(y3ToolboxVersion),
+            __TECHNICAL_QA_ENABLED__: JSON.stringify(technicalQaEnabled),
           },
           build: {
             outDir: 'dist-electron',
@@ -95,6 +98,7 @@ export default defineConfig({
           define: {
             __AGENT_RUNNER_URL__: JSON.stringify(agentRunnerUrl),
             __Y3_TOOLBOX_VERSION__: JSON.stringify(y3ToolboxVersion),
+            __TECHNICAL_QA_ENABLED__: JSON.stringify(technicalQaEnabled),
           },
           build: {
             lib: {

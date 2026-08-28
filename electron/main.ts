@@ -25,6 +25,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const BUILD_AGENT_RUNNER_URL = typeof __AGENT_RUNNER_URL__ === 'string' ? __AGENT_RUNNER_URL__ : '';
+const BUILD_TECHNICAL_QA_ENABLED = typeof __TECHNICAL_QA_ENABLED__ === 'boolean' && __TECHNICAL_QA_ENABLED__;
 const DEV_SERVER_PROBE_ATTEMPTS = 15;
 const DEV_SERVER_PROBE_INTERVAL_MS = 200;
 const DEV_RENDERER_INITIAL_TIMEOUT_MS = 3_000;
@@ -372,16 +373,17 @@ ipcMain.handle('agent-service:request', async (_event, request: unknown) => {
   }
 });
 
-// Technical QA uses an independent, header-only session boundary. Keep it separate
-// from Agent Job owner-token and query behavior.
-ipcMain.handle('technical-qa:request', async (_event, request: unknown) => {
-  try {
-    const result = await proxyTechnicalQaRequest(request);
-    return { success: true, ...result };
-  } catch {
-    return { success: false, status: 0, error: 'Technical QA service is unavailable.' };
-  }
-});
+if (BUILD_TECHNICAL_QA_ENABLED) {
+  // Technical QA uses an independent, header-only session boundary.
+  ipcMain.handle('technical-qa:request', async (_event, request: unknown) => {
+    try {
+      const result = await proxyTechnicalQaRequest(request);
+      return { success: true, ...result };
+    } catch {
+      return { success: false, status: 0, error: 'Technical QA service is unavailable.' };
+    }
+  });
+}
 
 ipcMain.handle('feedback:request', async (_event, request: unknown) => {
   try {

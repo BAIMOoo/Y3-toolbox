@@ -5,6 +5,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   define: {
     __Y3_TOOLBOX_VERSION__: JSON.stringify('0.1.6'),
+    __TECHNICAL_QA_ENABLED__: JSON.stringify(true),
   },
   test: {
     environment: 'node',

@@ -3,7 +3,7 @@
 ## Source of truth
 - Status: Active
 - Last refreshed: 2026-08-13
-- Primary product surfaces: change-log workbench, local Archive viewer, Agent Job Center, independent Technical QA workspace, dedicated Feedback workspace, and local Y3 lobby configuration workspace
+- Primary product surfaces: change-log workbench, local Archive viewer, Agent Job Center, dedicated Feedback workspace, and local Y3 lobby configuration workspace; Technical QA is retained only for explicitly enabled local testing
 - Evidence reviewed: `README.md`, `src/App.tsx`, `src/App.css`, `src/agentJobs/AgentJobCenter.tsx`, `docs/assets/readme/archive-diff-workbench.png`, the approved Technical QA handoff packet, and `.omx/plans/prd-user-feedback.md` plus `.omx/plans/test-spec-user-feedback.md`
 
 ## Brand
@@ -12,18 +12,18 @@
 - Avoid: marketing layouts, oversized headings, decorative cards, rounded pill-heavy UI, one-color screens, and hidden automation
 
 ## Product goals
-- Goals: make Y3 diagnostic and archive workflows fast to scan; make Technical QA, Feedback, and Lobby Configuration distinct first-class workspaces; give users a clear anonymous channel for actionable Bugs and Feature Requests; keep evidence, runtime state, and terminal outcomes understandable; configure `match.json` and `dungeon.json` safely from a selected Y3 source project
+- Goals: make Y3 diagnostic and archive workflows fast to scan; make Feedback and Lobby Configuration distinct first-class workspaces; give users a clear anonymous channel for actionable Bugs and Feature Requests; keep runtime state and terminal outcomes understandable; configure `match.json` and `dungeon.json` safely from a selected Y3 source project
 - Non-goals: a landing page, a general chat client, unrestricted project-directory access, automatic diagnostics, feedback status tracking or history, reply promises, code patching, publishing, BYOK, or model/provider selection
 - Success signals: users can switch modules without losing work, submit a structured anonymous Bug or Feature Request, retain a feedback draft after retryable failure, receive a clear acknowledgement without a tracking identifier, and preview then write valid lobby configuration without losing unknown JSON fields
 
 ## Personas and jobs
 - Primary personas: Y3 map makers, gameplay scripters, technical support staff, and maintainers diagnosing editor/Lua behavior
-- User jobs: inspect archive data, submit bounded service tasks, ask a technical question, report a reproducible product problem, and describe a desired improvement with its scenario and value
+- User jobs: inspect archive data, submit bounded service tasks, report a reproducible product problem, and describe a desired improvement with its scenario and value
 - Key contexts of use: Windows Electron desktop, long sessions, dense technical data, occasional narrow laptop windows, and slow or unavailable service connections
 
 ## Information architecture
-- Primary navigation: one compact top-level segmented control with `变动日志`, `本地 Archive`, `Agent 任务`, `技术问答`, and `大厅配置`; `反馈` is a persistent utility action immediately left of the theme switch
-- Core routes/screens: the existing workspaces, the independent Technical QA workspace, a dedicated form-first Feedback workspace, and a keep-alive Lobby Configuration workspace entered by selecting a Y3 source project root
+- Primary navigation: one compact top-level segmented control with `变动日志`, `本地 Archive`, `Agent 任务`, and `大厅配置`; `反馈` is a persistent utility action immediately left of the theme switch; local QA builds may add `技术问答`
+- Core routes/screens: the existing public workspaces, a dedicated form-first Feedback workspace, and a keep-alive Lobby Configuration workspace entered by selecting a Y3 source project root; Technical QA is local-test-only
 - Content hierarchy: module navigation first; the active workspace second; Feedback starts with type as the first question, then asks only for a title and one primary description before an optional progressive-disclosure section for diagnostics, contact, attachments, and disclosed metadata
 
 ## Design principles
@@ -47,7 +47,7 @@
 
 ## Components
 - Existing components to reuse: app shell, Ant Design segmented controls, buttons, alerts, tooltips, tags, typography, and theme provider
-- New/changed components: Technical QA workspace components; Feedback workspace and its structured form controls; Lobby Configuration project picker, level/mode editor, presets, validation summary, JSON previews, and guarded save action
+- New/changed components: local-test-only Technical QA workspace components; Feedback workspace and its structured form controls; Lobby Configuration project picker, level/mode editor, presets, validation summary, JSON previews, and guarded save action
 - Variants and states: empty, ready, validating, uploading, submitting, success, rate-limited, unavailable, retryable error, and non-retryable validation error; Feedback success is acknowledgement-only and exposes no backend ID, Admin URL, status, or history affordance
 - Token/component ownership: global shell tokens stay in `src/App.css`; Technical QA styles stay in `src/technicalQa`; Feedback state, components, and styles stay in a separate `src/feedback` module
 
@@ -80,7 +80,7 @@
 - Framework/styling system: React 19, TypeScript, Ant Design 6, existing icon package, plain CSS
 - Design-token constraints: extend existing CSS variables and both tone scopes; do not add a new theme layer or dependency
 - Performance constraints: bounded polling, stable list keys, independent scroll regions, and no full-workspace rerender from each unrelated shell state change
-- Compatibility constraints: Electron and browser transports share public DTOs; QA, Feedback, and Lobby Configuration use separate boundaries; existing module keep-alive semantics remain intact; Lobby Configuration uses dedicated IPC with an opened-project allowlist and exact 38-digit map ID handling; cross-repository Feedback DTOs use schema-versioned independent definitions verified by deterministic fixtures
+- Compatibility constraints: Electron and browser transports share public DTOs; QA, Feedback, and Lobby Configuration use separate boundaries; public builds omit QA navigation, workspace mounting, IPC, and preload exposure; existing module keep-alive semantics remain intact; Lobby Configuration uses dedicated IPC with an opened-project allowlist and exact 38-digit map ID handling; cross-repository Feedback DTOs use schema-versioned independent definitions verified by deterministic fixtures
 - Test/screenshot expectations: unit tests cover transport/state/validation/render states; Lobby Configuration tests cover model, validator, Electron file API, and workspace UI seams; full type/lint/test/build gates; Feedback and Lobby Configuration screenshots at desktop and narrow widths must show controls, errors, previews, and actions without overlap or clipping
 
 ## Open questions

@@ -2,6 +2,12 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { SaveLobbyConfigRequest } from '../src/lobbyConfig/contracts';
 
 const BUILD_AGENT_RUNNER_URL = typeof __AGENT_RUNNER_URL__ === 'string' ? __AGENT_RUNNER_URL__ : '';
+const BUILD_TECHNICAL_QA_ENABLED = typeof __TECHNICAL_QA_ENABLED__ === 'boolean' && __TECHNICAL_QA_ENABLED__;
+const technicalQaBridge = BUILD_TECHNICAL_QA_ENABLED
+  ? {
+      technicalQaRequest: (request: { path: string; method?: 'GET' | 'POST'; body?: unknown; sessionId: string }) => ipcRenderer.invoke('technical-qa:request', request),
+    }
+  : {};
 
 function getConfiguredAgentRunnerUrl(): string {
   const configuredUrl = process.env.AGENT_RUNNER_URL || process.env.VITE_AGENT_RUNNER_URL || BUILD_AGENT_RUNNER_URL;
@@ -38,7 +44,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Task service proxy for packaged file:// renderer builds
   getAgentServiceBaseUrl: getConfiguredAgentRunnerUrl,
   agentServiceRequest: (request: { path: string; method?: string; body?: unknown; ownerToken?: string }) => ipcRenderer.invoke('agent-service:request', request),
-  technicalQaRequest: (request: { path: string; method?: 'GET' | 'POST'; body?: unknown; sessionId: string }) => ipcRenderer.invoke('technical-qa:request', request),
+  ...technicalQaBridge,
   feedbackRequest: (request: { path: string; method?: 'GET' | 'POST'; body?: unknown; sessionId?: string }) => ipcRenderer.invoke('feedback:request', request),
   downloadAgentArtifact: (request: { url: string; filename?: string }) => ipcRenderer.invoke('agent-artifact:download', request),
   onAgentArtifactDownloadProgress: (callback: (progress: unknown) => void) => {

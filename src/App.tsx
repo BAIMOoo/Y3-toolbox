@@ -66,6 +66,7 @@ type UiTone = 'graphite' | 'paper';
 
 const UI_TONE_STORAGE_KEY = 'archive-diff-ui-tone';
 const UI_TONE_RENDER_VERSION = 'icon-tone-switch-v3';
+const TECHNICAL_QA_ENABLED = __TECHNICAL_QA_ENABLED__;
 
 
 const EMPTY_SNAPSHOT: Snapshot = Object.freeze({});
@@ -370,7 +371,7 @@ function App() {
                 { label: '变动日志', value: 'diff' },
                 { label: '本地 Archive', value: 'local-archive' },
                 { label: 'Agent 任务', value: 'agent-jobs' },
-                { label: '技术问答', value: 'technical-qa' },
+                ...(TECHNICAL_QA_ENABLED ? [{ label: '技术问答', value: 'technical-qa' as const }] : []),
                 { label: '大厅配置', value: 'lobby-config' },
               ]}
             />
@@ -428,14 +429,16 @@ function App() {
             <LocalArchiveViewer initialOpen={pendingArchiveOpen} onInitialPathConsumed={() => setPendingArchiveOpen(null)} />
           )}
           {mode === 'agent-jobs' && <AgentJobCenter />}
-          <section
-            data-testid="technical-qa-shell"
-            hidden={mode !== 'technical-qa'}
-            aria-hidden={mode !== 'technical-qa'}
-            className="technical-qa-shell"
-          >
-            <TechnicalQaWorkspace />
-          </section>
+          {TECHNICAL_QA_ENABLED && (
+            <section
+              data-testid="technical-qa-shell"
+              hidden={mode !== 'technical-qa'}
+              aria-hidden={mode !== 'technical-qa'}
+              className="technical-qa-shell"
+            >
+              <TechnicalQaWorkspace />
+            </section>
+          )}
           <section
             data-testid="feedback-shell"
             hidden={mode !== 'feedback'}
