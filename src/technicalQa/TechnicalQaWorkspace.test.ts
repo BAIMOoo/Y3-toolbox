@@ -1,10 +1,10 @@
 ﻿// @vitest-environment jsdom
 import React from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { QaThreadSession, QaTranscriptTurn, TechnicalQaController, TechnicalQaState } from './controller';
 import { QA_CLIENT_EVENT_FIXTURES } from './fixtures';
-import { createInitialQaTurnState, type QaTurnState } from './reducer';
+import { createInitialQaTurnState, reduceQaEventPage, type QaTurnState } from './reducer';
 import { TechnicalQaWorkspaceView } from './TechnicalQaWorkspace';
 import type { QaDomain, QaTerminalOutcome } from './types';
 
@@ -33,6 +33,7 @@ vi.mock('antd', () => ({
 vi.mock('@ant-design/icons', () => ({
   BookOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'book'),
   DeleteOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'delete'),
+  LoadingOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'loading'),
   PaperClipOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'clip'),
   PlusOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'plus'),
   ReloadOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'reload'),
@@ -40,7 +41,10 @@ vi.mock('@ant-design/icons', () => ({
   StopOutlined: () => React.createElement('span', { 'aria-hidden': 'true' }, 'stop'),
 }));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe('TechnicalQaWorkspaceView', () => {
   it('offers accessible file selection, removable pending items, and upload progress', () => {
@@ -143,6 +147,85 @@ describe('TechnicalQaWorkspaceView', () => {
     expect(screen.getByText('Y3 Editor 2.0 Trigger Documentation')).toBeTruthy();
     expect(screen.getByText('官方')).toBeTruthy();
     expect(screen.getByText('Triggers > Events')).toBeTruthy();
+  });
+
+  it('renders assistant answers as safe CommonMark while keeping questions plain', () => {
+    const markdownTurn = turn('markdown', terminalState({
+      kind: 'answer',
+      outcomeSchemaVersion: 2,
+      answer: [
+        '# 初始化',
+        '',
+        '使用 **Y3 助手** 并调用 `y3.game`。',
+        '',
+        '- 创建项目',
+        '- 运行测试',
+        '',
+        '```lua',
+        'print("ready")',
+        '```',
+        '',
+        '[官方文档](https://developer.y3-editor.com)',
+        '[危险链接](javascript:alert(1))',
+        '![远程图](https://example.com/tracker.png)',
+        '<script>window.evil = true</script>',
+      ].join('\n'),
+      evidenceState: 'sufficient',
+      answerBasis: 'grounded',
+      supportSegments: [],
+      citations: [],
+      notices: [],
+    }));
+    markdownTurn.question = '**用户问题**';
+
+    const { container } = renderWorkspace(stateWith([thread('thread-markdown', [markdownTurn])]));
+
+    expect(screen.getByRole('heading', { level: 3, name: '初始化' })).toBeTruthy();
+    expect(screen.getByText('Y3 助手').tagName).toBe('STRONG');
+    expect(screen.getByText('y3.game').tagName).toBe('CODE');
+    expect(screen.getByText('print("ready")').closest('pre')).toBeTruthy();
+    expect(screen.getByRole('link', { name: '官方文档' }).getAttribute('href'))
+      .toBe('https://developer.y3-editor.com');
+    expect(screen.queryByRole('link', { name: '危险链接' })).toBeNull();
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('远程图')).toBeTruthy();
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('.technical-qa__question p')?.textContent).toBe('**用户问题**');
+  });
+
+  it('tolerates incomplete Markdown while an answer is streaming', () => {
+    const streaming = turnState('streaming');
+    streaming.answerText = '正在生成 **尚未闭合\n\n```lua\nprint("partial")';
+
+    const { container } = renderWorkspace(stateWith([
+      thread('thread-streaming-markdown', [turn('streaming-markdown', streaming)]),
+    ]));
+
+    expect(container.querySelector('.technical-qa__answer p')?.textContent).toContain('正在生成');
+    expect(screen.getByText('print("partial")').tagName).toBe('CODE');
+    expect(container.querySelector('.technical-qa__cursor')).toBeTruthy();
+  });
+
+  it('shows the real answer phase and a live elapsed time while the backend is still working', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime('2026-08-05T09:00:00.000Z');
+    const completedRetrieval = QA_CLIENT_EVENT_FIXTURES.ecaAnswer;
+    const loadingState = reduceQaEventPage(createInitialQaTurnState(), {
+      ...completedRetrieval,
+      events: completedRetrieval.events.slice(0, 3),
+      nextCursor: 3,
+      terminal: false,
+    });
+
+    renderWorkspace(stateWith([thread('thread-1', [turn('q-1', loadingState)], '慢回答')]));
+
+    expect(screen.getByText('证据检索完成，正在生成回答…')).toBeTruthy();
+    expect(screen.getByText('已等待不到 1 秒')).toBeTruthy();
+
+    act(() => vi.advanceTimersByTime(65_000));
+
+    expect(screen.getByText('已等待 1 分 5 秒')).toBeTruthy();
+    expect(screen.getByText('耗时较长，仍在等待服务响应')).toBeTruthy();
   });
 
   it('hides internal v2 support segments while rendering unavailable-source notices outside plain answer', () => {

@@ -1,4 +1,4 @@
-import { createInitialQaTurnState, reduceQaEventPage, type QaTurnState } from './reducer';
+import { createInitialQaTurnState, reduceQaEventPage, type QaTurnPhase, type QaTurnState } from './reducer';
 import {
   prepareQaAttachments,
   toQaAttachmentSummary,
@@ -122,6 +122,7 @@ interface PersistedPendingTurnRecord {
       turnId: string;
       lastSequence: number;
       answerText: string;
+      phase?: QaTurnPhase;
     };
   };
 }
@@ -607,6 +608,7 @@ export class TechnicalQaController {
           turnId: turn.state.turnId,
           lastSequence: turn.state.lastSequence,
           answerText: turn.state.answerText,
+          phase: turn.state.phase,
         },
       },
     };
@@ -761,6 +763,7 @@ function parsePersistedPendingTurn(value: unknown): { thread: QaThreadSession; t
     || Number(turn.state.lastSequence) < 0
     || typeof turn.state.answerText !== 'string'
     || turn.state.answerText.length > 200_000
+    || (turn.state.phase !== undefined && !isQaTurnPhase(turn.state.phase))
   ) {
     return undefined;
   }
@@ -773,6 +776,7 @@ function parsePersistedPendingTurn(value: unknown): { thread: QaThreadSession; t
     threadId: turn.state.threadId,
     turnId: turn.state.turnId,
     status: turn.state.answerText ? 'streaming' : 'loading',
+    phase: turn.state.phase ?? inferRestoredTurnPhase(Number(turn.state.lastSequence), turn.state.answerText),
     answerText: turn.state.answerText,
     lastSequence: Number(turn.state.lastSequence),
   };
@@ -827,6 +831,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isQaDomain(value: unknown): value is QaDomain {
   return value === 'eca_editor' || value === 'lua_y3_lualib';
+}
+
+function isQaTurnPhase(value: unknown): value is QaTurnPhase {
+  return value === 'preparing' || value === 'retrieving' || value === 'generating';
+}
+
+function inferRestoredTurnPhase(lastSequence: number, answerText: string): QaTurnPhase {
+  if (answerText || lastSequence >= 3) return 'generating';
+  if (lastSequence >= 2) return 'retrieving';
+  return 'preparing';
 }
 
 function isSafeIdentifier(value: unknown): value is string {

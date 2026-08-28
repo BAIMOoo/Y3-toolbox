@@ -255,7 +255,6 @@
 }
 
 .technical-qa__question p,
-.technical-qa__answer,
 .technical-qa__phase,
 .technical-qa__terminal-copy,
 .technical-qa__follow-up p {
@@ -309,6 +308,33 @@
 
 .technical-qa__phase {
   color: var(--text-secondary);
+}
+
+.technical-qa__loading-progress {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-top: 9px;
+}
+
+.technical-qa__loading-progress > .anticon {
+  margin-top: 5px;
+  color: var(--accent-blue-strong);
+  font-size: 15px;
+}
+
+.technical-qa__loading-progress .technical-qa__phase {
+  margin-top: 0;
+}
+
+.technical-qa__waiting-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .technical-qa__cursor {
@@ -450,6 +476,81 @@
   color: var(--text-secondary);
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
+}
+
+.technical-qa__answer {
+  margin-top: 9px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.technical-qa__answer > :first-child,
+.technical-qa__answer > :first-child > :first-child {
+  margin-top: 0;
+}
+
+.technical-qa__answer > :last-child,
+.technical-qa__answer > :first-child > :last-child {
+  margin-bottom: 0;
+}
+
+.technical-qa__answer p,
+.technical-qa__answer ul,
+.technical-qa__answer ol,
+.technical-qa__answer blockquote,
+.technical-qa__answer pre,
+.technical-qa__answer hr,
+.technical-qa__answer h3,
+.technical-qa__answer h4,
+.technical-qa__answer h5,
+.technical-qa__answer h6 {
+  margin: 10px 0;
+}
+
+.technical-qa__answer h3 { font-size: 18px; }
+.technical-qa__answer h4 { font-size: 16px; }
+.technical-qa__answer h5,
+.technical-qa__answer h6 { font-size: 14px; }
+
+.technical-qa__answer ul,
+.technical-qa__answer ol {
+  padding-left: 24px;
+}
+
+.technical-qa__answer blockquote {
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.technical-qa__answer pre {
+  max-width: 100%;
+  padding: 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+}
+
+.technical-qa__answer code {
+  font-family: var(--font-mono);
+}
+
+.technical-qa__answer :not(pre) > code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+}
+
+.technical-qa__answer a {
+  color: var(--accent-blue-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.technical-qa__blocked-image {
+  color: var(--text-secondary);
+  font-style: italic;
 }
 
 .technical-qa__citation-detail blockquote {

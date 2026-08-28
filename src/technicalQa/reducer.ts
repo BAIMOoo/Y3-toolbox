@@ -11,10 +11,13 @@ export type QaTurnStatus =
   | 'cancelled'
   | 'protocol_error';
 
+export type QaTurnPhase = 'preparing' | 'retrieving' | 'generating';
+
 export interface QaTurnState {
   threadId?: string;
   turnId?: string;
   status: QaTurnStatus;
+  phase: QaTurnPhase;
   answerText: string;
   citations: QaCitation[];
   outcome?: QaTerminalOutcome;
@@ -28,6 +31,7 @@ export interface QaTurnState {
 export function createInitialQaTurnState(): QaTurnState {
   return {
     status: 'idle',
+    phase: 'preparing',
     answerText: '',
     citations: [],
     lastSequence: 0,
@@ -199,11 +203,13 @@ export function reduceQaEvent(state: QaTurnState, event: QaEvent): QaTurnState {
 
   switch (event.payload.type) {
     case 'turn.accepted':
+      return { ...next, status: 'loading', phase: 'preparing' };
     case 'retrieval.started':
+      return { ...next, status: 'loading', phase: 'retrieving' };
     case 'retrieval.completed':
-      return { ...next, status: 'loading' };
+      return { ...next, status: 'loading', phase: 'generating' };
     case 'answer.delta':
-      return { ...next, status: 'streaming', answerText: next.answerText + event.payload.delta };
+      return { ...next, status: 'streaming', phase: 'generating', answerText: next.answerText + event.payload.delta };
     case 'turn.completed': {
       const outcome = event.payload.outcome;
       const outcomeError = validateTerminalOutcome(outcome);

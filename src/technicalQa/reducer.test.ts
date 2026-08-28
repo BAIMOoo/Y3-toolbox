@@ -3,6 +3,19 @@ import { QA_CLIENT_EVENT_FIXTURES } from './fixtures';
 import { createInitialQaTurnState, reduceQaEvent, reduceQaEventPage } from './reducer';
 
 describe('technical QA transport-neutral event reducer', () => {
+  it('preserves the backend phase as a turn moves from preparation to retrieval and generation', () => {
+    const events = QA_CLIENT_EVENT_FIXTURES.ecaAnswer.events;
+    let state = createInitialQaTurnState();
+
+    expect(state.phase).toBe('preparing');
+    state = reduceQaEvent(state, events[0]!);
+    expect(state.phase).toBe('preparing');
+    state = reduceQaEvent(state, events[1]!);
+    expect(state.phase).toBe('retrieving');
+    state = reduceQaEvent(state, events[2]!);
+    expect(state.phase).toBe('generating');
+  });
+
   it('converges on supported ECA and Lua answers with citations', () => {
     for (const page of [QA_CLIENT_EVENT_FIXTURES.ecaAnswer, QA_CLIENT_EVENT_FIXTURES.luaAnswer]) {
       const state = reduceQaEventPage(createInitialQaTurnState(), page);

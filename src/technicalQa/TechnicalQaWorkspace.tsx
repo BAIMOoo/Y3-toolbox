@@ -1,6 +1,7 @@
 ﻿import {
   BookOutlined,
   DeleteOutlined,
+  LoadingOutlined,
   PaperClipOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -8,9 +9,10 @@
   StopOutlined,
 } from '@ant-design/icons';
 import { Button, Segmented, Tag, Tooltip } from 'antd';
-import { useRef, type ChangeEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { QA_ATTACHMENT_ACCEPT } from './attachments';
 import { technicalQaApi } from './api';
+import { MarkdownAnswer } from './MarkdownAnswer';
 import type {
   QaThreadSession,
   QaTranscriptTurn,
@@ -398,15 +400,10 @@ function TurnContent({ turn }: { turn: QaTranscriptTurn }) {
   const { outcome } = state;
 
   if (state.status === 'loading') {
-    return <p className="technical-qa__phase">正在检索并核对 Y3 2.0 证据…</p>;
+    return <LoadingTurnContent turn={turn} />;
   }
   if (state.status === 'streaming') {
-    return (
-      <p className="technical-qa__answer">
-        {state.answerText}
-        <span className="technical-qa__cursor" aria-hidden="true" />
-      </p>
-    );
+    return <MarkdownAnswer source={state.answerText} streaming />;
   }
   if (state.status === 'protocol_error') {
     return <p className="technical-qa__terminal-copy">回答数据顺序异常，已停止显示。请重新提问。</p>;
@@ -436,12 +433,12 @@ function TurnContent({ turn }: { turn: QaTranscriptTurn }) {
 
 function AnswerContent({ outcome }: { outcome: Extract<QaTerminalOutcome, { kind: 'answer' }> }) {
   if (!('outcomeSchemaVersion' in outcome) || outcome.outcomeSchemaVersion !== 2) {
-    return <p className="technical-qa__answer">{outcome.answer}</p>;
+    return <MarkdownAnswer source={outcome.answer} />;
   }
 
   return (
     <div className="technical-qa__answer-stack">
-      <p className="technical-qa__answer">{outcome.answer}</p>
+      <MarkdownAnswer source={outcome.answer} />
       {outcome.notices.length > 0 && (
         <ul className="technical-qa__answer-notices" aria-label="答案可用性提示">
           {outcome.notices.map((notice, index) => (
@@ -487,6 +484,49 @@ function CitationList({ citations }: { citations: QaCitation[] }) {
   );
 }
 
+function LoadingTurnContent({ turn }: { turn: QaTranscriptTurn }) {
+  const elapsedSeconds = useElapsedSeconds(turn.submittedAt);
+  return (
+    <div className="technical-qa__loading-progress">
+      <LoadingOutlined spin aria-hidden="true" />
+      <div>
+        <p className="technical-qa__phase">{getLoadingPhaseCopy(turn)}</p>
+        <div className="technical-qa__waiting-detail">
+          <span>{formatElapsedTime(elapsedSeconds)}</span>
+          {elapsedSeconds >= 30 && <span>耗时较长，仍在等待服务响应</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function useElapsedSeconds(submittedAt: string): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = globalThis.setInterval(() => setNow(Date.now()), 1_000);
+    return () => globalThis.clearInterval(timer);
+  }, [submittedAt]);
+  const startedAt = Date.parse(submittedAt);
+  if (!Number.isFinite(startedAt)) return 0;
+  return Math.max(0, Math.floor((now - startedAt) / 1_000));
+}
+
+function getLoadingPhaseCopy(turn: QaTranscriptTurn): string {
+  switch (turn.state.phase) {
+    case 'preparing': return '问题已接收，正在分析并准备回答…';
+    case 'retrieving': return '正在检索并核对 Y3 2.0 证据…';
+    case 'generating': return '证据检索完成，正在生成回答…';
+  }
+}
+
+function formatElapsedTime(elapsedSeconds: number): string {
+  if (elapsedSeconds < 1) return '已等待不到 1 秒';
+  if (elapsedSeconds < 60) return `已等待 ${elapsedSeconds} 秒`;
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return seconds === 0 ? `已等待 ${minutes} 分钟` : `已等待 ${minutes} 分 ${seconds} 秒`;
+}
+
 function findActiveTurn(threads: QaThreadSession[]): { thread: QaThreadSession; turn: QaTranscriptTurn } | null {
   for (const thread of threads) {
     const turn = thread.turns.at(-1);
@@ -521,7 +561,10 @@ function getEvidenceState(outcome: QaTerminalOutcome | undefined): QaEvidenceSta
 function getTurnStatusLabel(turn: QaTranscriptTurn): string {
   switch (turn.state.status) {
     case 'idle': return '等待中';
-    case 'loading': return '检索证据';
+    case 'loading':
+      if (turn.state.phase === 'retrieving') return '检索证据';
+      if (turn.state.phase === 'generating') return '生成回答';
+      return '准备回答';
     case 'streaming': return '回答中';
     case 'answer': return '已回答';
     case 'follow_up': return '需要补充';
