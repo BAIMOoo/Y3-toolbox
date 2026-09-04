@@ -24,6 +24,12 @@ describe('Electron mainline static smoke coverage', () => {
     expect(viteConfig).toContain("devServerUrl.hostname = '127.0.0.1'");
   });
 
+  it('starts development Electron without opening a Windows console', () => {
+    const viteConfig = read('vite.config.ts');
+
+    expect(viteConfig).toContain('startup(undefined, { windowsHide: true })');
+  });
+
   it('keeps local input IPC wired without weakening preload isolation', () => {
     const main = read('electron/main.ts');
     const preload = read('electron/preload.ts');

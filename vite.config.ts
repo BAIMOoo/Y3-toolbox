@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import type { SpawnOptions } from 'node:child_process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
@@ -10,7 +11,7 @@ async function startElectronOnce({
   startup,
   reload,
 }: {
-  startup: () => void | Promise<void>
+  startup: (argv?: string[], options?: SpawnOptions) => void | Promise<void>
   reload: () => void
 }) {
   if (hasStartedElectron) {
@@ -20,7 +21,7 @@ async function startElectronOnce({
 
   hasStartedElectron = true
   normalizeElectronDevServerUrl()
-  await startup()
+  await startup(undefined, { windowsHide: true })
 }
 
 function normalizeElectronDevServerUrl() {
