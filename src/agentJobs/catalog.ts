@@ -24,6 +24,16 @@ export const AGENT_SKILLS: AgentSkillDefinition[] = [
     ],
   },
   {
+    id: 'fetch-online-map-lua-errors',
+    label: '拉取线上地图 Lua 报错',
+    description: '按地图、最长 14 天的时间范围和可选玩家昵称，拉取线上 UniSDK 中具有 Lua 证据的完整报错日志，最终提供 ZIP 下载包。',
+    fields: [
+      { name: 'mapId', label: '地图 ID', type: 'text', required: true, placeholder: '例如 204521', description: '对于 maptest、测试大厅的地图，地图 ID 需要多加一个 10 前缀。' },
+      { name: 'timeRange', label: '时间范围', type: 'text', required: true, placeholder: '例如 最近 7 天，或 2026-09-01 00:00:00 至 2026-09-04 12:00:00', description: '支持明确的自然语言或绝对时间范围，以提交时间为相对时间基准；最长 14 天。' },
+      { name: 'players', label: '玩家昵称', type: 'textarea', required: false, placeholder: '可选，每行一个玩家昵称，最多 20 个' },
+    ],
+  },
+  {
     id: 'export-kkres-image',
     label: '导出 kkres 高分辨率图片',
     description: '使用桌面端自动暂存或已上传的图片标识导出 KKExport.kkres；图片上限为 4096*4096。',
@@ -76,8 +86,20 @@ export function validateAgentParams(skillId: AgentSkillId, params: Record<string
 
   if (skillId === 'fetch-archive-changes') return validateArchiveChangeParams(params);
   if (skillId === 'fetch-mismatch-logs') return validateMismatchParams(params);
+  if (skillId === 'fetch-online-map-lua-errors') return validateOnlineMapLuaErrorParams(params);
   if (skillId === 'export-kkres-image') return validateKkresParams(params);
   return [];
+}
+
+function validateOnlineMapLuaErrorParams(params: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  validateMapId(params.mapId, errors);
+  const timeRange = String(params.timeRange ?? '').trim();
+  if (timeRange.length > 200) errors.push('时间范围 is too long');
+  const players = Array.from(new Set(lines(params.players)));
+  if (players.length > 20) errors.push('玩家昵称 supports at most 20 unique lines');
+  if (players.some((player) => player.length > 128)) errors.push('玩家昵称 line is too long');
+  return errors;
 }
 
 function validateArchiveChangeParams(params: Record<string, unknown>): string[] {

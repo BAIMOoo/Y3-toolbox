@@ -1,4 +1,4 @@
-export type AgentSkillId = 'fetch-archive-changes' | 'fetch-mismatch-logs' | 'export-kkres-image';
+export type AgentSkillId = 'fetch-archive-changes' | 'fetch-mismatch-logs' | 'export-kkres-image' | 'fetch-online-map-lua-errors';
 
 export type AgentJobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 

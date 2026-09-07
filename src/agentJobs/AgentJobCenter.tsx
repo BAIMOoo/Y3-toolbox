@@ -698,7 +698,7 @@ function getDroppedKkresImagePaths(dataTransfer: DataTransfer): string[] {
 }
 
 function visibleDownloadArtifacts(job: AgentJobSummary) {
-  if (job.skillId === 'fetch-archive-changes' || job.skillId === 'fetch-mismatch-logs') {
+  if (job.skillId === 'fetch-archive-changes' || job.skillId === 'fetch-mismatch-logs' || job.skillId === 'fetch-online-map-lua-errors') {
     return job.artifacts.filter((artifact) => artifact.name.toLowerCase().endsWith('.zip'));
   }
   if (job.skillId === 'export-kkres-image') {

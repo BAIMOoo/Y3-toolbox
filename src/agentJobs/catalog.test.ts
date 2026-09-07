@@ -20,12 +20,22 @@ describe('agent skill catalog form contract', () => {
         .map((field) => ({ skillId: skill.id, field })),
     );
 
-    expect(mapFields.map(({ skillId }) => skillId).sort()).toEqual(['fetch-archive-changes', 'fetch-mismatch-logs']);
+    expect(mapFields.map(({ skillId }) => skillId).sort()).toEqual(['fetch-archive-changes', 'fetch-mismatch-logs', 'fetch-online-map-lua-errors']);
     for (const { field } of mapFields) {
       expect(field.description).toContain('maptest');
       expect(field.description).toContain('测试大厅');
       expect(field.description).toContain('10 前缀');
     }
+  });
+
+  it('defines the online Lua error form and validates optional player lines', () => {
+    const skill = AGENT_SKILLS.find((candidate) => candidate.id === 'fetch-online-map-lua-errors');
+    expect(skill?.label).toBe('拉取线上地图 Lua 报错');
+    expect(skill?.fields.map((field) => field.name)).toEqual(['mapId', 'timeRange', 'players']);
+    expect(validateAgentParams('fetch-online-map-lua-errors', { mapId: '204521', timeRange: '最近 7 天' })).toEqual([]);
+    expect(validateAgentParams('fetch-online-map-lua-errors', {
+      mapId: '204521', timeRange: '昨天', players: Array.from({ length: 21 }, (_, index) => `玩家${index}`).join('\n'),
+    }).join('\n')).toContain('at most 20 unique lines');
   });
 
   it('keeps kkres export form limited to staged image identifiers and describes desktop staging', () => {
