@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useDeferredValue, useMemo } from 'react';
 import type { TimePoint, FilterState, ArchiveChange, RawLogRow } from '../types';
 import { parseCsvFile, parseCsvText } from '../parser/csvParser';
 import { buildTimePoints, extractRootKeys } from '../parser/pipeline';
@@ -27,6 +27,11 @@ export function useArchiveData() {
   const recoveryAidDetection = useMemo(() => detectRecoveryAid(rawRows), [rawRows]);
   const recoveryAid = recoveryAidDetection.aid;
   const recoveryAidConflict = recoveryAidDetection.status === 'multiple' ? recoveryAidDetection.distinctAids : [];
+  const deferredSearchKeyword = useDeferredValue(filter.searchKeyword);
+  const filterForResults = useMemo<FilterState>(() => ({
+    ...filter,
+    searchKeyword: deferredSearchKeyword,
+  }), [filter.timeRange, filter.rootKeys, filter.changeTypes, deferredSearchKeyword]);
 
   const filteredTimePoints = useMemo(() => {
     return timePoints
@@ -38,12 +43,12 @@ export function useArchiveData() {
         return true;
       })
       .map((tp) => {
-        const filteredChanges = filterChanges(tp.changes, filter);
+        const filteredChanges = filterChanges(tp.changes, filterForResults);
         if (filteredChanges.length === 0) return null;
         return { ...tp, changes: filteredChanges };
       })
       .filter((tp): tp is TimePoint => tp !== null);
-  }, [timePoints, filter]);
+  }, [timePoints, filterForResults]);
 
   // O(1) index Map: index → filteredTimePoint
   const filteredIndexMap = useMemo(() => {

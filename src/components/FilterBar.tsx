@@ -1,5 +1,5 @@
 // src/components/FilterBar.tsx
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback } from 'react';
 import { Select, Input, DatePicker, Tooltip } from 'antd';
 import { SearchOutlined, DownloadOutlined } from '@ant-design/icons';
 import type { FilterState, ChangeType } from '../types';
@@ -9,7 +9,7 @@ const { RangePicker } = DatePicker;
 
 interface FilterBarProps {
   filter: FilterState;
-  onFilterChange: (filter: FilterState) => void;
+  onFilterChange: React.Dispatch<React.SetStateAction<FilterState>>;
   availableRootKeys: string[];
   onFileSelected: (file: File) => void;
   loading: boolean;
@@ -26,26 +26,18 @@ const CHANGE_TYPE_OPTIONS: { value: ChangeType; label: string; color: string; ic
   { value: 'noop', label: '未变', color: 'var(--text-muted)', icon: '·' },
 ];
 
-/** 搜索输入组件（防抖 300ms），用非受控 input 避免 useEffect+setState */
-const DebouncedSearchInput: React.FC<{
-  defaultValue: string;
+/** 搜索输入组件：立即保留输入，筛选计算由数据层延后处理。 */
+const SearchInput: React.FC<{
+  value: string;
   onSearch: (value: string) => void;
-}> = ({ defaultValue, onSearch }) => {
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleChange = useCallback((value: string) => {
-    if (debounceRef.current !== null) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => onSearch(value), 300);
-  }, [onSearch]);
-
+}> = ({ value, onSearch }) => {
   return (
     <Input
-      key={defaultValue} // 外部重置时通过 key 重建
       placeholder="搜索键名或值"
       prefix={<SearchOutlined style={{ color: 'var(--text-muted)' }} />}
-      defaultValue={defaultValue}
-      onChange={(e) => handleChange(e.target.value)}
-      onClear={() => { if (debounceRef.current !== null) clearTimeout(debounceRef.current); onSearch(''); }}
+      value={value}
+      onChange={(e) => onSearch(e.target.value)}
+      onClear={() => onSearch('')}
       style={{ width: 220, fontFamily: 'var(--font-mono)' }}
       allowClear
       size="small"
@@ -66,8 +58,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 }) => {
 
   const handleSearch = useCallback(
-    (keyword: string) => onFilterChange({ ...filter, searchKeyword: keyword }),
-    [filter, onFilterChange],
+    (keyword: string) => onFilterChange((previous) => ({ ...previous, searchKeyword: keyword })),
+    [onFilterChange],
   );
 
   return (
@@ -107,12 +99,12 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             showTime
             placeholder={['开始时间', '结束时间']}
             onChange={(dates) => {
-              onFilterChange({
-                ...filter,
+              onFilterChange((previous) => ({
+                ...previous,
                 timeRange: dates && dates[0] && dates[1]
                   ? [dates[0].toDate(), dates[1].toDate()]
                   : null,
-              });
+              }));
             }}
             size="small"
             style={{ width: 284 }}
@@ -122,7 +114,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             mode="multiple"
             placeholder="存档键"
             value={filter.rootKeys}
-            onChange={(rootKeys) => onFilterChange({ ...filter, rootKeys })}
+            onChange={(rootKeys) => onFilterChange((previous) => ({ ...previous, rootKeys }))}
             options={availableRootKeys.map((k) => ({ value: k, label: k }))}
             style={{ minWidth: 132 }}
             allowClear
@@ -134,7 +126,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             mode="multiple"
             placeholder="变动类型"
             value={filter.changeTypes}
-            onChange={(changeTypes) => onFilterChange({ ...filter, changeTypes })}
+            onChange={(changeTypes) => onFilterChange((previous) => ({ ...previous, changeTypes }))}
             style={{ minWidth: 138 }}
             allowClear
             size="small"
@@ -149,8 +141,8 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             ))}
           </Select>
 
-          <DebouncedSearchInput
-            defaultValue={filter.searchKeyword}
+          <SearchInput
+            value={filter.searchKeyword}
             onSearch={handleSearch}
           />
         </div>

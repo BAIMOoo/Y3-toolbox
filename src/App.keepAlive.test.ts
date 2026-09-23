@@ -290,4 +290,25 @@ describe('App workspace keep-alive behavior', () => {
     window.dispatchEvent(confirmedUnload);
     expect(confirmedUnload.defaultPrevented).toBe(false);
   }, 15_000);
+
+  it('does not let timeline shortcuts hijack editable controls or other modules', async () => {
+    const { default: App } = await import('./App');
+    render(React.createElement(App));
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }));
+    expect(setSelectedIndex).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', cancelable: true }));
+    expect(setSelectedIndex).toHaveBeenCalledWith(1);
+
+    setSelectedIndex.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Agent 任务' }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', cancelable: true }));
+    expect(setSelectedIndex).not.toHaveBeenCalled();
+
+    input.remove();
+  });
 });

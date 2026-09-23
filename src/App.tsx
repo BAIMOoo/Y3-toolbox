@@ -71,6 +71,12 @@ const TECHNICAL_QA_ENABLED = __TECHNICAL_QA_ENABLED__;
 
 const EMPTY_SNAPSHOT: Snapshot = Object.freeze({});
 
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest('input, textarea, select, [contenteditable], [role="textbox"], [role="combobox"]')) return true;
+  return target instanceof HTMLElement && target.isContentEditable;
+}
+
 function countSnapshotKeys(obj: Record<string, SnapshotValue>): number {
   let count = 0;
   for (const key of Object.keys(obj)) {
@@ -227,30 +233,33 @@ function App() {
 
   // 键盘快捷键支持
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (timePoints.length === 0) return;
-    // 如果焦点在输入框内则不拦截
-    const tag = (e.target as HTMLElement).tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (mode !== 'diff' || timePoints.length === 0) return;
+    if (e.defaultPrevented || e.isComposing || isEditableKeyboardTarget(e.target)) return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
 
     switch (e.key) {
       case 'ArrowLeft':
+        if (selectedIndex === 0) return;
         e.preventDefault();
         setSelectedIndex(Math.max(0, selectedIndex - 1));
         break;
       case 'ArrowRight':
+        if (selectedIndex === timePoints.length - 1) return;
         e.preventDefault();
         setSelectedIndex(Math.min(timePoints.length - 1, selectedIndex + 1));
         break;
       case 'Home':
+        if (selectedIndex === 0) return;
         e.preventDefault();
         setSelectedIndex(0);
         break;
       case 'End':
+        if (selectedIndex === timePoints.length - 1) return;
         e.preventDefault();
         setSelectedIndex(timePoints.length - 1);
         break;
     }
-  }, [timePoints.length, selectedIndex, setSelectedIndex]);
+  }, [mode, timePoints.length, selectedIndex, setSelectedIndex]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);

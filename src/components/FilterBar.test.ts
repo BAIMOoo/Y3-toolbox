@@ -17,8 +17,8 @@ vi.mock('antd', () => {
     DatePicker: {
       RangePicker: () => React.createElement('input', { 'aria-label': '时间范围' }),
     },
-    Input: ({ placeholder, onChange }: { placeholder?: string; onChange?: React.ChangeEventHandler<HTMLInputElement> }) => (
-      React.createElement('input', { 'aria-label': placeholder, placeholder, onChange })
+    Input: ({ placeholder, value, onChange, onClear }: { placeholder?: string; value?: string; onChange?: React.ChangeEventHandler<HTMLInputElement>; onClear?: () => void }) => (
+      React.createElement('input', { 'aria-label': placeholder, placeholder, value, onChange, onClear })
     ),
     Select: MockSelect,
     Tooltip: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
@@ -93,5 +93,54 @@ describe('FilterBar recovery action', () => {
     renderFilterBar({ fileName: null });
 
     expect(screen.getByRole('button', { name: '存档回退' })).toHaveProperty('disabled', true);
+  });
+
+  it('keeps the search input focused while the search filter updates', () => {
+    function Harness() {
+      const [filter, setFilter] = React.useState(emptyFilter);
+      return React.createElement(FilterBar, {
+        filter,
+        onFilterChange: setFilter,
+        availableRootKeys: [],
+        onFileSelected: vi.fn(),
+        loading: false,
+        fileName: 'player.csv',
+      });
+    }
+
+    render(React.createElement(Harness));
+    const input = screen.getByPlaceholderText('搜索键名或值') as HTMLInputElement;
+    input.focus();
+    fireEvent.change(input, { target: { value: 'gold' } });
+
+    expect(screen.getByPlaceholderText('搜索键名或值')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe('gold');
+  });
+
+  it('synchronizes an external search reset without replacing the input node', () => {
+    const onFilterChange = vi.fn();
+    const initialProps = {
+      filter: { ...emptyFilter, searchKeyword: 'gold' },
+      onFilterChange,
+      availableRootKeys: [],
+      onFileSelected: vi.fn(),
+      loading: false,
+      fileName: 'player.csv',
+    };
+    const { rerender } = render(React.createElement(FilterBar, initialProps));
+    const input = screen.getByPlaceholderText('搜索键名或值') as HTMLInputElement;
+
+    rerender(React.createElement(FilterBar, {
+      filter: emptyFilter,
+      onFilterChange,
+      availableRootKeys: [],
+      onFileSelected: vi.fn(),
+      loading: false,
+      fileName: 'player.csv',
+    }));
+
+    expect(screen.getByPlaceholderText('搜索键名或值')).toBe(input);
+    expect(input.value).toBe('');
   });
 });
