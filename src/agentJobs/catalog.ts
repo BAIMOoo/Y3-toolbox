@@ -2,16 +2,19 @@ import type { AgentSkillDefinition, AgentSkillId } from './types';
 
 export const TRUSTED_RUNNER_WARNING = '共享任务服务：提交后会执行真实任务；任务按浏览器本地标识区分，服务可能限流、排队、维护或暂停提交。';
 
+export const ARCHIVE_CHANGE_MAX_RANGE_DAYS = 15;
+export const ARCHIVE_CHANGE_RETENTION_DAYS = 30;
+
 export const AGENT_SKILLS: AgentSkillDefinition[] = [
   {
     id: 'fetch-archive-changes',
     label: '拉取存档日志',
-    description: '按玩家/aid、地图 id 和时间范围拉取 archive_diff 存档变动日志，最终仅提供 ZIP 下载包（内含 CSV 和摘要）。',
+    description: '按玩家/aid、地图 id 和最长 15 天的时间范围拉取 archive_diff 存档变动日志；存档日志只保留最近约 30 天，最终仅提供 ZIP 下载包（内含 CSV 和摘要）。',
     fields: [
       { name: 'players', label: '玩家昵称或 aid', type: 'textarea', required: true, placeholder: '每行一个玩家名、昵称#后缀或 raw aid' },
       { name: 'mapId', label: '地图 ID', type: 'text', required: true, placeholder: '例如 204521', description: '对于 maptest、测试大厅的地图，地图 ID 需要多加一个 10 前缀。' },
-      { name: 'from', label: '开始时间', type: 'datetime', required: true, placeholder: '可填 2026.06.09-10:00:00、昨天、今天 10 点等；agent 会归一化' },
-      { name: 'to', label: '结束时间', type: 'datetime', required: true, placeholder: '可填 2026.06.09-12:00:00、现在、明天凌晨等；结束时间按 exclusive 处理' },
+      { name: 'from', label: '开始时间', type: 'datetime', required: true, placeholder: '可填 2026.06.09-10:00:00、昨天、今天 10 点等；agent 会归一化', description: `存档日志只保留最近约 ${ARCHIVE_CHANGE_RETENTION_DAYS} 天；开始时间早于 ${ARCHIVE_CHANGE_RETENTION_DAYS} 天前的部分已经拉取不到。` },
+      { name: 'to', label: '结束时间', type: 'datetime', required: true, placeholder: '可填 2026.06.09-12:00:00、现在、明天凌晨等；结束时间按 exclusive 处理', description: `结束时间减开始时间最长 ${ARCHIVE_CHANGE_MAX_RANGE_DAYS} 天，更长的范围会被拒绝，请拆成多次任务。` },
     ],
   },
   {
@@ -113,7 +116,40 @@ function validateArchiveChangeParams(params: Record<string, unknown>): string[] 
     const value = String(params[name] ?? '').trim();
     if (value.length > 80) errors.push(`${name} is too long`);
   }
+  errors.push(...validateArchiveChangeRange(params.from, params.to));
   return errors;
+}
+
+function validateArchiveChangeRange(from: unknown, to: unknown): string[] {
+  const errors: string[] = [];
+  const fromValue = String(from ?? '').trim();
+  const toValue = String(to ?? '').trim();
+  const fromDate = parseAbsoluteAgentTime(fromValue);
+  const toDate = parseAbsoluteAgentTime(toValue);
+  if (!fromDate && ABSOLUTE_AGENT_TIME_PATTERN.test(fromValue)) errors.push('开始时间 must be a valid date');
+  if (!toDate && ABSOLUTE_AGENT_TIME_PATTERN.test(toValue)) errors.push('结束时间 must be a valid date');
+  // Relative ranges such as 昨天 or 现在 are normalized and bounded by the task service.
+  if (!fromDate || !toDate) return errors;
+  if (toDate.getTime() <= fromDate.getTime()) return [...errors, '结束时间 must be after 开始时间'];
+  const spanDays = (toDate.getTime() - fromDate.getTime()) / 86_400_000;
+  if (spanDays > ARCHIVE_CHANGE_MAX_RANGE_DAYS) {
+    errors.push(`时间范围 must not exceed ${ARCHIVE_CHANGE_MAX_RANGE_DAYS} days; split the request into shorter ranges`);
+  }
+  // The 30-day retention limit depends on the current clock and on normalized relative ranges, so it is
+  // enforced by the run-time skill helper (which refuses ranges older than the retention window).
+  return errors;
+}
+
+const ABSOLUTE_AGENT_TIME_PATTERN = /^(\d{4})[.\-/年](\d{1,2})[.\-/月](\d{1,2})日?(?:[-\sT]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/;
+
+function parseAbsoluteAgentTime(value: unknown): Date | null {
+  const match = String(value ?? '').trim().match(ABSOLUTE_AGENT_TIME_PATTERN);
+  if (!match) return null;
+  const [, year, month, day, hour = '0', minute = '0', second = '0'] = match;
+  const monthIndex = Number(month) - 1;
+  const date = new Date(Number(year), monthIndex, Number(day), Number(hour), Number(minute), Number(second));
+  if (Number.isNaN(date.getTime()) || date.getMonth() !== monthIndex || date.getDate() !== Number(day)) return null;
+  return date;
 }
 
 function validateMismatchParams(params: Record<string, unknown>): string[] {
