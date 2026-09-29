@@ -26,6 +26,14 @@ const RERUN_UNSUPPORTED_SKILLS = new Set<AgentSkillId>(['export-kkres-image']);
 const RERUN_UNSUPPORTED_REASON = '该技能暂不支持重跑';
 const RERUN_RELATIVE_TIME_NOTICE = '相对时间（例如“昨天”“最近 7 天”）会以本次提交时间为基准重新计算，请确认范围后提交。';
 
+/**
+ * 二次确认走受控 Modal 而不是 Modal.confirm：静态方法渲染在 ConfigProvider 之外，
+ * 在这个深色主题的界面里会显示成白色弹窗，位置也不居中。
+ */
+type PendingAgentJobConfirm =
+  | { kind: 'cancel-job'; job: AgentJobSummary }
+  | { kind: 'rerun-overwrite'; skillId: AgentSkillId; params: NonNullable<AgentJobSummary['params']> };
+
 function formatRunningDuration(job: Pick<AgentJobSummary, 'startedAt' | 'createdAt'>): string {
   const since = Date.parse(job.startedAt ?? job.createdAt);
   if (!Number.isFinite(since)) return '未知时长';
@@ -50,6 +58,8 @@ export function AgentJobCenter() {
   const [cancelPending, setCancelPending] = useState(false);
   const [rerunPending, setRerunPending] = useState(false);
   const [rerunNotice, setRerunNotice] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingAgentJobConfirm | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const latestEventIdsRef = useRef<Record<string, number>>({});
   const activeStageRequestIdRef = useRef<string | null>(null);
@@ -325,13 +335,7 @@ export function AgentJobCenter() {
         applyRerunParams(rerunnable.skillId, rerunnable.params);
         return;
       }
-      Modal.confirm({
-        title: '覆盖当前未提交的输入？',
-        content: '提交表单里已有改动，重跑会用所选任务的历史参数覆盖这些内容。',
-        okText: '覆盖并重跑',
-        cancelText: '返回',
-        onOk: () => applyRerunParams(rerunnable.skillId, rerunnable.params),
-      });
+      setPendingConfirm({ kind: 'rerun-overwrite', skillId: rerunnable.skillId, params: rerunnable.params });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -339,35 +343,42 @@ export function AgentJobCenter() {
     }
   }, [applyRerunParams, isFormEdited, resolveRerunnableParams]);
 
+  const commitCancelJob = useCallback(async (job: AgentJobSummary) => {
+    setCancelPending(true);
+    setError(null);
+    try {
+      const payload = await cancelAgentJob(job.id);
+      setJobs((current) => current.map((item) => (item.id === payload.job.id ? payload.job : item)));
+      setActionNotice('任务已取消。已生成的产物会保留，但可能不完整。');
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      setError(/already finished/i.test(text) ? '任务已经结束，取消未生效；列表已刷新为最新状态。' : text);
+      void refresh().catch(() => undefined);
+    } finally {
+      setCancelPending(false);
+      setPendingConfirm(null);
+    }
+  }, [refresh]);
+
   const cancelJob = useCallback((job: AgentJobSummary) => {
-    const confirmCancel = () => {
-      setCancelPending(true);
-      setError(null);
-      void cancelAgentJob(job.id)
-        .then((payload) => {
-          setJobs((current) => current.map((item) => (item.id === payload.job.id ? payload.job : item)));
-          message.success('任务已取消。');
-        })
-        .catch((err: unknown) => {
-          const text = err instanceof Error ? err.message : String(err);
-          setError(/already finished/i.test(text) ? '任务已经结束，取消未生效；列表已刷新为最新状态。' : text);
-          void refresh().catch(() => undefined);
-        })
-        .finally(() => setCancelPending(false));
-    };
+    // 排队中的任务还没开始执行，取消没有破坏性；运行中的任务会丢弃已跑进度，先确认。
     if (job.status !== 'running') {
-      confirmCancel();
+      void commitCancelJob(job);
       return;
     }
-    Modal.confirm({
-      title: '确认取消这个任务？',
-      content: `任务已运行 ${formatRunningDuration(job)}，取消会终止它的进程树。已经生成的产物会保留，但可能不完整。`,
-      okText: '取消任务',
-      okButtonProps: { danger: true },
-      cancelText: '返回',
-      onOk: confirmCancel,
-    });
-  }, [refresh]);
+    setPendingConfirm({ kind: 'cancel-job', job });
+  }, [commitCancelJob]);
+
+  const confirmPendingAction = useCallback(() => {
+    if (!pendingConfirm) return;
+    if (pendingConfirm.kind === 'rerun-overwrite') {
+      applyRerunParams(pendingConfirm.skillId, pendingConfirm.params);
+      setPendingConfirm(null);
+      return;
+    }
+    // 取消请求期间保持弹窗打开并显示确认按钮的加载态。
+    void commitCancelJob(pendingConfirm.job);
+  }, [applyRerunParams, commitCancelJob, pendingConfirm]);
 
   return (
     <section className="agent-job-center" aria-label="Agent 任务中心">
@@ -408,6 +419,7 @@ export function AgentJobCenter() {
         />
       )}
       {error && <Alert type="error" showIcon closable message={error} onClose={() => setError(null)} />}
+      {actionNotice && <Alert type="success" showIcon closable message={actionNotice} onClose={() => setActionNotice(null)} />}
 
       <div className="agent-job-workspace">
         <Card title="提交任务" className="agent-job-card agent-job-submit-card">
@@ -588,6 +600,21 @@ export function AgentJobCenter() {
           )}
         </Card>
       </div>
+      <Modal
+        centered
+        open={Boolean(pendingConfirm)}
+        title={pendingConfirm?.kind === 'cancel-job' ? '确认取消这个任务？' : '覆盖当前未提交的输入？'}
+        okText={pendingConfirm?.kind === 'cancel-job' ? '取消任务' : '覆盖并重跑'}
+        cancelText="返回"
+        okButtonProps={pendingConfirm?.kind === 'cancel-job' ? { danger: true } : undefined}
+        confirmLoading={pendingConfirm?.kind === 'cancel-job' && cancelPending}
+        onOk={confirmPendingAction}
+        onCancel={() => setPendingConfirm(null)}
+      >
+        {pendingConfirm?.kind === 'cancel-job'
+          ? `任务已运行 ${formatRunningDuration(pendingConfirm.job)}，取消会终止它的进程树。已经生成的产物会保留，但可能不完整。`
+          : '提交表单里已有改动，重跑会用所选任务的历史参数覆盖这些内容。'}
+      </Modal>
     </section>
   );
 }
