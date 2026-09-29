@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getAgentQueueStatus, getAgentRunnerStatus, hasActiveAgentJobs, isTerminalAgentJob, refreshActiveAgentJobs } from './agentJobCenterStatus';
+import { canCancelAgentJob, getAgentJobStatusView, getAgentQueueStatus, getAgentRunnerStatus, hasActiveAgentJobs, isTerminalAgentJob, refreshActiveAgentJobs } from './agentJobCenterStatus';
 import type { AgentHealthResponse, AgentJobSummary } from './types';
 
 const baseHealth: AgentHealthResponse = {
@@ -185,3 +185,44 @@ function fullJob(id: string, status: AgentJobSummary['status'], createdAt: strin
     artifacts: [],
   };
 }
+
+describe('cancel and rerun availability', () => {
+  it('treats only queued and running jobs as active', () => {
+    expect(isTerminalAgentJob(job('queued'))).toBe(false);
+    expect(isTerminalAgentJob(job('running'))).toBe(false);
+    expect(isTerminalAgentJob(job('succeeded'))).toBe(true);
+    expect(isTerminalAgentJob(job('failed'))).toBe(true);
+  });
+
+  it('treats a status this client does not know as finished instead of polling it forever', () => {
+    const unknown = { status: 'expired-by-a-newer-server' } as unknown as Pick<AgentJobSummary, 'status'>;
+    expect(isTerminalAgentJob(unknown)).toBe(true);
+  });
+
+  it('only offers cancel while the job is still queued or running', () => {
+    expect(canCancelAgentJob(job('queued'))).toBe(true);
+    expect(canCancelAgentJob(job('running'))).toBe(true);
+    expect(canCancelAgentJob(job('succeeded'))).toBe(false);
+    expect(canCancelAgentJob(job('failed'))).toBe(false);
+  });
+});
+
+describe('job status view', () => {
+  it('renders the plain states without the old misleading retry wording', () => {
+    expect(getAgentJobStatusView({ status: 'queued' })).toEqual({ label: '等待', color: 'warning' });
+    expect(getAgentJobStatusView({ status: 'running' })).toEqual({ label: '执行中', color: 'processing' });
+    expect(getAgentJobStatusView({ status: 'succeeded' })).toEqual({ label: '成功', color: 'success' });
+    expect(getAgentJobStatusView({ status: 'failed' })).toEqual({ label: '失败', color: 'error' });
+  });
+
+  it('labels a cancelled job from cancelledAt even though the wire status stays failed', () => {
+    expect(getAgentJobStatusView({ status: 'failed', cancelledAt: '2026-09-20T10:00:00.000Z' }))
+      .toEqual({ label: '已取消', color: 'warning' });
+  });
+
+  it('never throws on an unknown status so an old client cannot white-screen', () => {
+    const view = getAgentJobStatusView({ status: 'brand-new-status' } as unknown as Pick<AgentJobSummary, 'status'>);
+    expect(view.label).toBe('brand-new-status');
+    expect(view.color).toBe('default');
+  });
+});

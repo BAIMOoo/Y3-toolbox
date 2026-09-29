@@ -12,7 +12,8 @@ export type AgentJobEventType =
   | 'artifacts-validated'
   | 'recovery'
   | 'succeeded'
-  | 'failed';
+  | 'failed'
+  | 'cancelled';
 
 export type AgentFieldType = 'text' | 'textarea' | 'number' | 'datetime' | 'path';
 
@@ -51,6 +52,8 @@ export interface AgentJobSummary {
   startedAt?: string;
   finishedAt?: string;
   artifacts: AgentArtifact[];
+  cancelledAt?: string;
+  params?: Record<string, string | number | boolean | string[]>;
 }
 
 export interface AgentJobEvent {
@@ -60,6 +63,7 @@ export interface AgentJobEvent {
   message: string;
   createdAt: string;
   stream?: 'stdout' | 'stderr';
+  previousStatus?: AgentJobStatus;
 }
 
 export interface AgentJobEventsResponse {

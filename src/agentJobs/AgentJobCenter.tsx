@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react';
 import { DownloadOutlined } from '@ant-design/icons';
-import { Button, Alert, Card, Input, InputNumber, Progress, Select, Space, Tag, Typography, message } from 'antd';
-import { fetchAgentHealth, getAgentArtifactDownloadUrl, fetchAgentJob, fetchAgentJobEvents, fetchAgentJobs, fetchAgentSkills, getAgentOwnerToken, submitAgentJob } from './api';
+import { Button, Alert, Card, Input, InputNumber, Modal, Progress, Select, Space, Tag, Tooltip, Typography, message } from 'antd';
+import { cancelAgentJob, fetchAgentHealth, getAgentArtifactDownloadUrl, fetchAgentJob, fetchAgentJobEvents, fetchAgentJobs, fetchAgentSkills, getAgentOwnerToken, submitAgentJob } from './api';
 import { evaluateAgentCompatibility } from './agentCompatibility';
 import { applyAgentParamDefaults, getAgentParamDefaults, validateAgentParams } from './catalog';
-import type { AgentHealthResponse, AgentJobEvent, AgentJobEventsResponse, AgentJobSummary, AgentSkillDefinition, AgentSubmitRequest } from './types';
+import type { AgentHealthResponse, AgentJobEvent, AgentJobEventsResponse, AgentJobSummary, AgentSkillDefinition, AgentSkillId, AgentSubmitRequest } from './types';
 import { AgentJobEventList } from './AgentJobEventList';
 import { filterUserVisibleJobEvents } from './eventVisibility';
-import { getAgentQueueStatus, getAgentRunnerStatus, hasActiveAgentJobs, isTerminalAgentJob, refreshActiveAgentJobs } from './agentJobCenterStatus';
+import { canCancelAgentJob, getAgentJobStatusView, getAgentQueueStatus, getAgentRunnerStatus, hasActiveAgentJobs, isTerminalAgentJob, refreshActiveAgentJobs } from './agentJobCenterStatus';
 import { handleAgentArtifactDownloadClick } from './artifactDownload';
 import { getArtifactDownloadScopeKey, getVisibleArtifactDownloadProgress, isTerminalArtifactDownloadProgress, type AgentArtifactDownloadProgressByJob } from './artifactDownloadProgress';
 import { formatArtifactSize } from './formatArtifactSize';
@@ -20,6 +20,18 @@ const KKRES_IMPORT_SAFETY_TITLE = '导入前安全提醒';
 const KKRES_IMPORT_SAFETY_DESCRIPTION = '不要直接把生成的 KKRes 导入正式项目；请先导入测试项目确认资源管理器和 UI 编辑器显示正常，导入正式项目前请先做好项目备份。';
 const PARTIAL_ARCHIVE_ARTIFACT_WARNING_TITLE = '任务失败，但有部分下载包';
 const PARTIAL_ARCHIVE_ARTIFACT_WARNING_DESCRIPTION = '这个 ZIP 只包含失败前已安全写出的部分归档变更证据，内容可能不完整；任务仍为失败状态，请按失败日志重试或排查。';
+// 重跑只是把历史参数回填到提交表单，不会自动提交；kkres 的图片参数在服务端已被解析成绝对
+// 路径，无法安全回提，因此该技能暂不提供重跑入口。
+const RERUN_UNSUPPORTED_SKILLS = new Set<AgentSkillId>(['export-kkres-image']);
+const RERUN_UNSUPPORTED_REASON = '该技能暂不支持重跑';
+const RERUN_RELATIVE_TIME_NOTICE = '相对时间（例如“昨天”“最近 7 天”）会以本次提交时间为基准重新计算，请确认范围后提交。';
+
+function formatRunningDuration(job: Pick<AgentJobSummary, 'startedAt' | 'createdAt'>): string {
+  const since = Date.parse(job.startedAt ?? job.createdAt);
+  if (!Number.isFinite(since)) return '未知时长';
+  const elapsedMs = Math.max(0, Date.now() - since);
+  return elapsedMs < 60_000 ? `${Math.round(elapsedMs / 1000)} 秒` : `${(elapsedMs / 60_000).toFixed(1)} 分钟`;
+}
 
 export function AgentJobCenter() {
   const [skills, setSkills] = useState<AgentSkillDefinition[]>([]);
@@ -35,6 +47,8 @@ export function AgentJobCenter() {
   const [loading, setLoading] = useState(false);
   const [stageProgress, setStageProgress] = useState<StageProgressState | null>(null);
   const [artifactDownloadProgressByJob, setArtifactDownloadProgressByJob] = useState<AgentArtifactDownloadProgressByJob>({});
+  const [cancelPending, setCancelPending] = useState(false);
+  const [rerunNotice, setRerunNotice] = useState<string | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const latestEventIdsRef = useRef<Record<string, number>>({});
   const activeStageRequestIdRef = useRef<string | null>(null);
@@ -55,6 +69,7 @@ export function AgentJobCenter() {
   );
   const showPartialArchiveArtifactWarning = activeJob?.skillId === 'fetch-archive-changes'
     && activeJob.status === 'failed'
+    && !activeJob.cancelledAt
     && activeJobDownloadArtifacts.length > 0;
   const compatibility = useMemo(() => evaluateAgentCompatibility(health?.release), [health]);
   const maintenanceSubmitBlocked = Boolean(health?.queue.submissionsDisabled);
@@ -265,6 +280,75 @@ export function AgentJobCenter() {
     }
   };
 
+  const isFormEdited = useCallback((): boolean => {
+    if (!selectedSkill) return false;
+    const defaults = getAgentParamDefaults(selectedSkill.id);
+    const current = applyAgentParamDefaults(selectedSkill.id, formValues);
+    return Object.keys({ ...defaults, ...current })
+      .some((name) => String(current[name] ?? '') !== String(defaults[name] ?? ''));
+  }, [formValues, selectedSkill]);
+
+  const applyRerunParams = useCallback((job: AgentJobSummary) => {
+    if (!job.params) return;
+    const prefilled: Record<string, string | number> = {};
+    for (const [name, value] of Object.entries(job.params)) {
+      if (Array.isArray(value)) prefilled[name] = value.join('\n');
+      else prefilled[name] = typeof value === 'boolean' ? String(value) : value;
+    }
+    setSelectedSkillId(job.skillId);
+    setFormValues({ ...getAgentParamDefaults(job.skillId), ...prefilled });
+    setError(null);
+    setRerunNotice(RERUN_RELATIVE_TIME_NOTICE);
+  }, []);
+
+  const rerunJob = useCallback((job: AgentJobSummary) => {
+    if (!job.params) {
+      setError('这个任务没有可复用的参数，请重新填写后提交。');
+      return;
+    }
+    if (!isFormEdited()) {
+      applyRerunParams(job);
+      return;
+    }
+    Modal.confirm({
+      title: '覆盖当前未提交的输入？',
+      content: '提交表单里已有改动，重跑会用所选任务的历史参数覆盖这些内容。',
+      okText: '覆盖并重跑',
+      cancelText: '返回',
+      onOk: () => applyRerunParams(job),
+    });
+  }, [applyRerunParams, isFormEdited]);
+
+  const cancelJob = useCallback((job: AgentJobSummary) => {
+    const confirmCancel = () => {
+      setCancelPending(true);
+      setError(null);
+      void cancelAgentJob(job.id)
+        .then((payload) => {
+          setJobs((current) => current.map((item) => (item.id === payload.job.id ? payload.job : item)));
+          message.success('任务已取消。');
+        })
+        .catch((err: unknown) => {
+          const text = err instanceof Error ? err.message : String(err);
+          setError(/already finished/i.test(text) ? '任务已经结束，取消未生效；列表已刷新为最新状态。' : text);
+          void refresh().catch(() => undefined);
+        })
+        .finally(() => setCancelPending(false));
+    };
+    if (job.status !== 'running') {
+      confirmCancel();
+      return;
+    }
+    Modal.confirm({
+      title: '确认取消这个任务？',
+      content: `任务已运行 ${formatRunningDuration(job)}，取消会终止它的进程树。已经生成的产物会保留，但可能不完整。`,
+      okText: '取消任务',
+      okButtonProps: { danger: true },
+      cancelText: '返回',
+      onOk: confirmCancel,
+    });
+  }, [refresh]);
+
   return (
     <section className="agent-job-center" aria-label="Agent 任务中心">
       <div className="agent-job-topbar">
@@ -325,6 +409,9 @@ export function AgentJobCenter() {
               />
             )}
             {selectedSkill && !bootstrapLoading && <Typography.Paragraph type="secondary">{selectedSkill.description}</Typography.Paragraph>}
+            {rerunNotice && (
+              <Alert type="info" showIcon closable message="已按历史任务回填参数" description={rerunNotice} onClose={() => setRerunNotice(null)} />
+            )}
             {selectedSkill?.fields.map((field) => {
               if (selectedSkill.id === 'export-kkres-image' && field.name === 'images') {
                 return (
@@ -408,6 +495,14 @@ export function AgentJobCenter() {
                   <div className="agent-job-detail-hero__title">
                     <h3>{activeJob.skillLabel}</h3>
                   </div>
+                  <Space wrap size={[8, 8]} className="agent-job-actions">
+                    {canCancelAgentJob(activeJob) && (
+                      <Button danger loading={cancelPending} onClick={() => cancelJob(activeJob)}>取消任务</Button>
+                    )}
+                    {isTerminalAgentJob(activeJob) && (RERUN_UNSUPPORTED_SKILLS.has(activeJob.skillId)
+                      ? <Tooltip title={RERUN_UNSUPPORTED_REASON}><span className="agent-job-action-disabled"><Button disabled>重跑</Button></span></Tooltip>
+                      : <Button onClick={() => rerunJob(activeJob)}>重跑</Button>)}
+                  </Space>
                   {activeJobDownloadArtifacts.length > 0 && (
                     <Space wrap size={[8, 8]} className="agent-job-downloads">
                       {activeJobDownloadArtifacts.map((artifact) => (
@@ -495,19 +590,6 @@ function AgentJobLoadingState({ message: loadingMessage }: { message: string }) 
       <Typography.Text type="secondary">{loadingMessage}</Typography.Text>
     </div>
   );
-}
-
-function getAgentJobStatusView(job: AgentJobSummary): { label: string; color: 'success' | 'error' | 'processing' | 'warning' } {
-  switch (job.status) {
-    case 'queued':
-      return { label: '等待', color: 'warning' };
-    case 'running':
-      return { label: '执行中', color: 'processing' };
-    case 'succeeded':
-      return { label: '成功', color: 'success' };
-    case 'failed':
-      return { label: '重试', color: 'error' };
-  }
 }
 
 interface KkresImagePathFieldProps {

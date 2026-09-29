@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchAgentJob, fetchAgentJobEvents, fetchAgentJobs, fetchAgentSkills, getAgentArtifactDownloadUrl, getAgentOwnerToken, getAgentServiceBaseUrl, submitAgentJob } from './api';
+import { cancelAgentJob, fetchAgentJob, fetchAgentJobEvents, fetchAgentJobs, fetchAgentSkills, getAgentArtifactDownloadUrl, getAgentOwnerToken, getAgentServiceBaseUrl, submitAgentJob } from './api';
 import type { ElectronAPI } from '../types/electron';
 
 type TestWindow = { electronAPI?: Partial<ElectronAPI>; localStorage?: Pick<Storage, 'getItem' | 'setItem'> };
@@ -62,6 +62,34 @@ describe('agent job API transport', () => {
       method: 'POST',
       body: { skillId: 'fetch-mismatch-logs', params: { mapId: '10204416', days: 7 }, clientVersion: '0.1.6', ownerToken: 'owner-token-0001' },
     });
+  });
+
+  it('cancels a job through the Electron proxy with the owner token in the path', async () => {
+    const agentServiceRequest = vi.fn<ElectronAPI['agentServiceRequest']>().mockResolvedValue({
+      success: true,
+      status: 200,
+      payload: { job: { id: 'job 1', status: 'failed', cancelledAt: '2026-09-20T10:00:00.000Z' } },
+    });
+    globalWithWindow.window = { electronAPI: { agentServiceRequest }, localStorage: createMemoryStorage('owner-token-0005') };
+
+    await cancelAgentJob('job 1');
+
+    expect(agentServiceRequest).toHaveBeenCalledWith({
+      path: '/api/jobs/job%201/cancel?ownerToken=owner-token-0005',
+      method: 'POST',
+      body: undefined,
+    });
+  });
+
+  it('surfaces the task service conflict message when a job already finished', async () => {
+    const agentServiceRequest = vi.fn<ElectronAPI['agentServiceRequest']>().mockResolvedValue({
+      success: true,
+      status: 409,
+      payload: { error: 'Job already finished', jobStatus: 'failed' },
+    });
+    globalWithWindow.window = { electronAPI: { agentServiceRequest }, localStorage: createMemoryStorage('owner-token-0006') };
+
+    await expect(cancelAgentJob('job-1')).rejects.toThrow('Job already finished');
   });
 
   it('includes owner token when listing and loading jobs', async () => {

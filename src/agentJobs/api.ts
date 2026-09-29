@@ -110,3 +110,7 @@ export function fetchAgentJobEvents(jobId: string, after?: number): Promise<Agen
 export function submitAgentJob(request: AgentSubmitRequest): Promise<{ job: AgentJobSummary }> {
   return requestJson('/api/jobs', { method: 'POST', body: JSON.stringify({ ...request, clientVersion: Y3_TOOLBOX_CLIENT_VERSION, ownerToken: getAgentOwnerToken() }) });
 }
+
+export function cancelAgentJob(jobId: string): Promise<{ job: AgentJobSummary }> {
+  return requestJson(withOwnerToken(`/api/jobs/${encodeURIComponent(jobId)}/cancel`), { method: 'POST' });
+}

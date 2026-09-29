@@ -1,7 +1,18 @@
 import type { AgentCompatibilityResult } from './agentCompatibility';
 import type { AgentHealthResponse, AgentJobSummary } from './types';
 
-const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed']);
+/**
+ * 只有排队中和执行中算“进行中”。判定写成反选而不是终态白名单：任务服务将来新增任何状态时，
+ * 已发布的旧客户端也只会把它当成已结束，而不是把未知状态当成未完成、无限轮询。
+ */
+const ACTIVE_JOB_STATUSES = new Set<string>(['queued', 'running']);
+
+export type AgentJobStatusTone = 'success' | 'warning' | 'error' | 'processing' | 'default';
+
+export interface AgentJobStatusView {
+  label: string;
+  color: AgentJobStatusTone;
+}
 
 export type AgentRunnerStatusTone = 'success' | 'warning' | 'error' | 'processing';
 export type AgentQueueStatusTone = 'success' | 'warning' | 'error';
@@ -52,7 +63,36 @@ export function getAgentQueueStatus(health: AgentHealthResponse | null, options:
 }
 
 export function isTerminalAgentJob(job: Pick<AgentJobSummary, 'status'>): boolean {
-  return TERMINAL_JOB_STATUSES.has(job.status);
+  return !ACTIVE_JOB_STATUSES.has(job.status);
+}
+
+/**
+ * 取消是终态 failed 上的一个标记：公开接口不暴露 cancelled 状态值，这样还没升级的客户端
+ * 遇到取消过的任务时不会在状态映射上崩溃。
+ */
+export function isCancelledAgentJob(job: Pick<AgentJobSummary, 'cancelledAt'>): boolean {
+  return Boolean(job.cancelledAt);
+}
+
+export function canCancelAgentJob(job: Pick<AgentJobSummary, 'status'>): boolean {
+  return ACTIVE_JOB_STATUSES.has(job.status);
+}
+
+export function getAgentJobStatusView(job: Pick<AgentJobSummary, 'status' | 'cancelledAt'>): AgentJobStatusView {
+  if (isCancelledAgentJob(job)) return { label: '已取消', color: 'warning' };
+  switch (job.status) {
+    case 'queued':
+      return { label: '等待', color: 'warning' };
+    case 'running':
+      return { label: '执行中', color: 'processing' };
+    case 'succeeded':
+      return { label: '成功', color: 'success' };
+    case 'failed':
+      return { label: '失败', color: 'error' };
+    default:
+      // 未知状态按“已结束”渲染，绝不因为不认识它而抛错。
+      return { label: String(job.status ?? '未知状态'), color: 'default' };
+  }
 }
 
 export function hasActiveAgentJobs(jobs: Pick<AgentJobSummary, 'status'>[]): boolean {
