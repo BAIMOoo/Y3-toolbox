@@ -48,6 +48,7 @@ export function AgentJobCenter() {
   const [stageProgress, setStageProgress] = useState<StageProgressState | null>(null);
   const [artifactDownloadProgressByJob, setArtifactDownloadProgressByJob] = useState<AgentArtifactDownloadProgressByJob>({});
   const [cancelPending, setCancelPending] = useState(false);
+  const [rerunPending, setRerunPending] = useState(false);
   const [rerunNotice, setRerunNotice] = useState<string | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const latestEventIdsRef = useRef<Record<string, number>>({});
@@ -288,36 +289,55 @@ export function AgentJobCenter() {
       .some((name) => String(current[name] ?? '') !== String(defaults[name] ?? ''));
   }, [formValues, selectedSkill]);
 
-  const applyRerunParams = useCallback((job: AgentJobSummary) => {
-    if (!job.params) return;
+  const applyRerunParams = useCallback((skillId: AgentSkillId, params: NonNullable<AgentJobSummary['params']>) => {
     const prefilled: Record<string, string | number> = {};
-    for (const [name, value] of Object.entries(job.params)) {
+    for (const [name, value] of Object.entries(params)) {
       if (Array.isArray(value)) prefilled[name] = value.join('\n');
       else prefilled[name] = typeof value === 'boolean' ? String(value) : value;
     }
-    setSelectedSkillId(job.skillId);
-    setFormValues({ ...getAgentParamDefaults(job.skillId), ...prefilled });
+    setSelectedSkillId(skillId);
+    setFormValues({ ...getAgentParamDefaults(skillId), ...prefilled });
     setError(null);
     setRerunNotice(RERUN_RELATIVE_TIME_NOTICE);
   }, []);
 
-  const rerunJob = useCallback((job: AgentJobSummary) => {
-    if (!job.params) {
-      setError('这个任务没有可复用的参数，请重新填写后提交。');
-      return;
+  /**
+   * 任务列表只返回摘要、不带参数，可复用的参数只存在于单任务详情接口里，所以点击重跑时
+   * 才去取一次，并把取回的详情合并回列表，后续操作看到的就是带参数的任务。
+   */
+  const resolveRerunnableParams = useCallback(async (job: AgentJobSummary) => {
+    if (job.params) return { skillId: job.skillId, params: job.params };
+    const payload = await fetchAgentJob(job.id);
+    setJobs((current) => current.map((item) => (item.id === payload.job.id ? { ...item, ...payload.job } : item)));
+    return payload.job.params ? { skillId: payload.job.skillId, params: payload.job.params } : null;
+  }, []);
+
+  const rerunJob = useCallback(async (job: AgentJobSummary) => {
+    setRerunPending(true);
+    setError(null);
+    try {
+      const rerunnable = await resolveRerunnableParams(job);
+      if (!rerunnable) {
+        setError('这个任务没有可复用的参数，请重新填写后提交。');
+        return;
+      }
+      if (!isFormEdited()) {
+        applyRerunParams(rerunnable.skillId, rerunnable.params);
+        return;
+      }
+      Modal.confirm({
+        title: '覆盖当前未提交的输入？',
+        content: '提交表单里已有改动，重跑会用所选任务的历史参数覆盖这些内容。',
+        okText: '覆盖并重跑',
+        cancelText: '返回',
+        onOk: () => applyRerunParams(rerunnable.skillId, rerunnable.params),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRerunPending(false);
     }
-    if (!isFormEdited()) {
-      applyRerunParams(job);
-      return;
-    }
-    Modal.confirm({
-      title: '覆盖当前未提交的输入？',
-      content: '提交表单里已有改动，重跑会用所选任务的历史参数覆盖这些内容。',
-      okText: '覆盖并重跑',
-      cancelText: '返回',
-      onOk: () => applyRerunParams(job),
-    });
-  }, [applyRerunParams, isFormEdited]);
+  }, [applyRerunParams, isFormEdited, resolveRerunnableParams]);
 
   const cancelJob = useCallback((job: AgentJobSummary) => {
     const confirmCancel = () => {
@@ -501,7 +521,7 @@ export function AgentJobCenter() {
                     )}
                     {isTerminalAgentJob(activeJob) && (RERUN_UNSUPPORTED_SKILLS.has(activeJob.skillId)
                       ? <Tooltip title={RERUN_UNSUPPORTED_REASON}><span className="agent-job-action-disabled"><Button disabled>重跑</Button></span></Tooltip>
-                      : <Button onClick={() => rerunJob(activeJob)}>重跑</Button>)}
+                      : <Button loading={rerunPending} onClick={() => void rerunJob(activeJob)}>重跑</Button>)}
                     {activeJobDownloadArtifacts.length > 0 && (
                       <Space wrap size={[8, 8]} className="agent-job-downloads">
                         {activeJobDownloadArtifacts.map((artifact) => (
