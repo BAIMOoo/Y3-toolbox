@@ -2411,6 +2411,20 @@ button {
   min-width: 0;
 }
 
+.agent-job-detail-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+/* 置灰的重跑按钮包一层，禁用的 button 自己不接收鼠标事件，提示挂在外层才有悬停反馈。 */
+.agent-job-action-disabled {
+  display: inline-flex;
+}
+
 .agent-job-detail h3 {
   margin: 0;
   color: var(--text-primary);
@@ -2499,7 +2513,6 @@ button {
 
 .agent-job-downloads {
   margin-top: 0;
-  justify-content: end;
   min-width: 0;
 }
 
@@ -2650,6 +2663,10 @@ button {
 
   .agent-job-detail-hero__header {
     grid-template-columns: 1fr;
+  }
+
+  .agent-job-detail-hero__actions {
+    justify-content: flex-start;
   }
 
   .agent-job-downloads {

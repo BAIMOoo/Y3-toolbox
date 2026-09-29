@@ -495,32 +495,32 @@ export function AgentJobCenter() {
                   <div className="agent-job-detail-hero__title">
                     <h3>{activeJob.skillLabel}</h3>
                   </div>
-                  <Space wrap size={[8, 8]} className="agent-job-actions">
+                  <div className="agent-job-detail-hero__actions">
                     {canCancelAgentJob(activeJob) && (
                       <Button danger loading={cancelPending} onClick={() => cancelJob(activeJob)}>取消任务</Button>
                     )}
                     {isTerminalAgentJob(activeJob) && (RERUN_UNSUPPORTED_SKILLS.has(activeJob.skillId)
                       ? <Tooltip title={RERUN_UNSUPPORTED_REASON}><span className="agent-job-action-disabled"><Button disabled>重跑</Button></span></Tooltip>
                       : <Button onClick={() => rerunJob(activeJob)}>重跑</Button>)}
-                  </Space>
-                  {activeJobDownloadArtifacts.length > 0 && (
-                    <Space wrap size={[8, 8]} className="agent-job-downloads">
-                      {activeJobDownloadArtifacts.map((artifact) => (
-                        <Button
-                          key={artifact.id}
-                          size="middle"
-                          className="agent-job-download-button"
-                          href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
-                          title={`下载 ${artifact.name} (${formatArtifactSize(artifact.sizeBytes)})`}
-                          onClick={(event) => void handleArtifactDownload(event, activeJob.id, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
-                        >
-                          <DownloadOutlined className="agent-job-download-icon" aria-hidden="true" />
-                          <span className="agent-job-download-label">下载</span>
-                          <span className="agent-job-download-size">{formatArtifactSize(artifact.sizeBytes)}</span>
-                        </Button>
-                      ))}
-                    </Space>
-                  )}
+                    {activeJobDownloadArtifacts.length > 0 && (
+                      <Space wrap size={[8, 8]} className="agent-job-downloads">
+                        {activeJobDownloadArtifacts.map((artifact) => (
+                          <Button
+                            key={artifact.id}
+                            size="middle"
+                            className="agent-job-download-button"
+                            href={getAgentArtifactDownloadUrl(artifact.downloadUrl)}
+                            title={`下载 ${artifact.name} (${formatArtifactSize(artifact.sizeBytes)})`}
+                            onClick={(event) => void handleArtifactDownload(event, activeJob.id, getAgentArtifactDownloadUrl(artifact.downloadUrl), artifact.name)}
+                          >
+                            <DownloadOutlined className="agent-job-download-icon" aria-hidden="true" />
+                            <span className="agent-job-download-label">下载</span>
+                            <span className="agent-job-download-size">{formatArtifactSize(artifact.sizeBytes)}</span>
+                          </Button>
+                        ))}
+                      </Space>
+                    )}
+                  </div>
                 </div>
                 <ReadableJobMessage className="agent-job-summary" message={activeJob.summary} />
               </div>
