@@ -1,28 +1,51 @@
 // src/components/Timeline.tsx
 import React, { useMemo, useEffect, useState } from 'react';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts, { type EChartsInstance } from 'echarts-for-react';
 import type { TimePoint } from '../types';
 import { buildTimelineStats } from './timelineStats';
-
-/** ECharts tooltip formatter 参数类型 */
-interface TimelineDatum {
-  value: [number, number];
-  baseColor: string;
-  _tpIndex: number;
-  _rawCount: number;
-  _createCount: number;
-  _updateCount: number;
-  _deleteCount: number;
-}
-
-interface TooltipParam {
-  value: [number, number];
-  data?: TimelineDatum & { itemStyle?: unknown };
-}
+import {
+  SELECTED_COLOR,
+  SELECTED_GLOW,
+  SELECTED_LIGHT,
+  SELECTED_LINE,
+  buildTimelineBaseOption,
+  buildTimelineOverlayGeometry,
+  findTimelineDisplayIndex,
+  markTimelineSelection,
+  resolveTimelineSelectionPoint,
+  type TimelineBarLayout,
+  type TimelineDisplayDatum,
+  type TimelineGridRect,
+  type TimelineOverlayGeometry,
+} from './timelineOption';
 
 /** ECharts click 事件参数类型 */
 interface ChartClickParam {
   data?: { _tpIndex?: number };
+}
+
+interface TimelineChartInternals {
+  convertToPixel: (
+    finder: { xAxisIndex?: number; yAxisIndex?: number },
+    value: number,
+  ) => number | number[];
+  getModel: () => {
+    getSeriesByIndex: (index: number) => {
+      getData: () => {
+        getItemLayout: (index: number) => TimelineBarLayout | undefined;
+      };
+    };
+    getComponent: (type: string, index: number) => {
+      coordinateSystem?: {
+        getRect?: () => TimelineGridRect;
+      };
+    };
+  };
+}
+
+interface SelectionOverlayState {
+  geometry: TimelineOverlayGeometry;
+  label: string;
 }
 
 
@@ -66,6 +89,11 @@ function formatTime(date: Date): string {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function readPixel(value: number | number[]): number | null {
+  const pixel = Array.isArray(value) ? value[0] : value;
+  return Number.isFinite(pixel) ? pixel : null;
+}
+
 /** 格式化时间为简短格式 MM-DD HH:mm */
 function formatTimeShort(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -102,12 +130,6 @@ function usePrefersReducedMotion(): boolean {
 
   return prefersReducedMotion;
 }
-
-// ——— 选中节点色彩系统：低饱和蓝灰，减少 glow ———
-const SELECTED_COLOR = '#a9bbdf';
-const SELECTED_GLOW = 'rgba(169, 187, 223, 0.22)';
-const SELECTED_LIGHT = '#c2cce1';
-const SELECTED_LINE = 'rgba(169, 187, 223, 0.52)';
 
 // ——— 时间轴专用配色：专业工具低饱和语义色 ———
 const COLOR_CREATE = '#84c8a4';
@@ -161,190 +183,67 @@ export const Timeline: React.FC<TimelineProps> = ({
     [timePoints, filteredIndexMap],
   );
 
-  const option = useMemo(() => {
-    if (timePoints.length === 0) return {};
+  const [echartsInstance, setEchartsInstance] = useState<EChartsInstance | null>(null);
+  const [selectionOverlay, setSelectionOverlay] = useState<SelectionOverlayState | null>(null);
 
-    const { useLogAxis } = timelineStats;
-    const data = timelineStats.data.map((datum) => {
-      const isSelected = datum._tpIndex === selectedIndex;
-      const rawCount = datum._rawCount;
+  const option = useMemo(
+    () => buildTimelineBaseOption(timelineStats, prefersReducedMotion),
+    [timelineStats, prefersReducedMotion],
+  );
 
-      return {
-        ...datum,
-        itemStyle: {
-          color: isSelected ? SELECTED_COLOR : datum.baseColor,
-          opacity: isSelected ? 0.95 : rawCount > 0 ? 0.62 : 0.16,
-          borderRadius: isSelected ? [3, 3, 0, 0] : [2, 2, 0, 0],
-          shadowColor: isSelected ? SELECTED_GLOW : 'transparent',
-          shadowBlur: isSelected ? 5 : 0,
-        },
-        emphasis: {
-          itemStyle: {
-            opacity: 0.95,
-            shadowColor: isSelected ? SELECTED_GLOW : 'transparent',
-            shadowBlur: isSelected ? 6 : 0,
-          },
-        },
-      };
-    });
+  useEffect(() => {
+    markTimelineSelection(selectedIndex);
 
-    // 选中 markLine
-    const selectedTP = timePoints[selectedIndex];
-    const markLineData = selectedTP
-      ? [
+    if (!echartsInstance) return;
+
+    const updateOverlay = () => {
+      const selection = resolveTimelineSelectionPoint(timelineStats, selectedIndex);
+      if (!selection) {
+        setSelectionOverlay(null);
+        return;
+      }
+
+      const internals = echartsInstance as unknown as TimelineChartInternals;
+      const model = internals.getModel();
+      const displayData = option.series[0].data as TimelineDisplayDatum[];
+      const displayIndex = findTimelineDisplayIndex(displayData, selectedIndex);
+      const bar = displayIndex >= 0
+        ? model.getSeriesByIndex(0).getData().getItemLayout(displayIndex)
+        : null;
+      const grid = model.getComponent('grid', 0).coordinateSystem?.getRect?.();
+      const centerX = readPixel(internals.convertToPixel({ xAxisIndex: 0 }, selection.timestampMs));
+      const barTop = readPixel(internals.convertToPixel({ yAxisIndex: 0 }, selection.displayCount));
+      const barBottom = readPixel(internals.convertToPixel(
+        { yAxisIndex: 0 },
+        timelineStats.useLogAxis ? 0.5 : 0,
+      ));
+      if (!bar || !grid || centerX === null || barTop === null || barBottom === null) {
+        setSelectionOverlay(null);
+        return;
+      }
+
+      setSelectionOverlay({
+        geometry: buildTimelineOverlayGeometry(
           {
-            xAxis: selectedTP.timestamp.getTime(),
-            lineStyle: {
-              color: SELECTED_LINE,
-              width: 1.5,
-              type: 'solid' as const,
-            },
-            label: {
-              show: true,
-              formatter: formatTime(selectedTP.timestamp),
-              position: 'insideStartTop' as const,
-              color: '#d7deec',
-              fontSize: 9,
-              fontFamily: "'JetBrains Mono', monospace",
-              backgroundColor: 'rgba(27, 34, 48, 0.96)',
-              padding: [2, 6],
-              borderRadius: 3,
-            },
+            x: centerX - bar.width / 2,
+            y: barTop,
+            width: bar.width,
+            height: Math.max(0, barBottom - barTop),
           },
-        ]
-      : [];
-
-    // markPoint — 选中柱子顶部的倒三角指示器
-    const markPointData = selectedTP
-      ? [
-          {
-            coord: [
-              selectedTP.timestamp.getTime(),
-              useLogAxis
-                ? (timelineStats.counts[selectedIndex] === 0 ? 0.5 : timelineStats.counts[selectedIndex])
-                : timelineStats.counts[selectedIndex],
-            ],
-            symbol: 'triangle',
-            symbolSize: [10, 6],
-            symbolRotate: 180,
-            symbolOffset: [0, -8],
-            itemStyle: {
-              color: SELECTED_COLOR,
-              shadowColor: SELECTED_GLOW,
-              shadowBlur: 4,
-            },
-            label: { show: false },
-          },
-        ]
-      : [];
-
-    const yAxisConfig = useLogAxis
-      ? {
-          type: 'log' as const,
-          logBase: 10,
-          min: 0.5,
-          axisLabel: {
-            color: '#596579',
-            fontSize: 9,
-            fontFamily: "'JetBrains Mono', monospace",
-            formatter: (val: number) => (val < 1 ? '0' : String(Math.round(val))),
-          },
-          axisLine: { show: false },
-          splitLine: { lineStyle: { color: '#222a36', type: 'dashed' as const, opacity: 0.46 } },
-        }
-      : {
-          type: 'value' as const,
-          axisLabel: {
-            color: '#596579',
-            fontSize: 9,
-            fontFamily: "'JetBrains Mono', monospace",
-          },
-          axisLine: { show: false },
-          splitLine: { lineStyle: { color: '#222a36', type: 'dashed' as const, opacity: 0.46 } },
-          minInterval: 1,
-        };
-
-    return {
-      grid: { left: 44, right: 12, top: 12, bottom: 32 },
-      xAxis: {
-        type: 'time',
-        axisLabel: {
-          color: '#596579',
-          fontSize: 9,
-          fontFamily: "'JetBrains Mono', monospace",
-        },
-        axisLine: { lineStyle: { color: '#222a36' } },
-        splitLine: { show: false },
-        axisTick: { lineStyle: { color: '#222a36' } },
-      },
-      yAxis: yAxisConfig,
-      tooltip: {
-        trigger: 'item',
-        backgroundColor: 'rgba(16, 20, 28, 0.98)',
-        borderColor: 'rgba(142, 164, 210, 0.24)',
-        borderWidth: 1,
-        textStyle: { color: '#e5eaf2', fontSize: 11, fontFamily: "'JetBrains Mono', monospace" },
-        formatter: (params: TooltipParam) => {
-          const d = new Date(params.value[0]);
-          const dateStr = d.toLocaleString('zh-CN');
-          const idx = params.data?._tpIndex;
-          const rawCount = params.data?._rawCount ?? 0;
-          const createCount = params.data?._createCount ?? 0;
-          const updateCount = params.data?._updateCount ?? 0;
-          const deleteCount = params.data?._deleteCount ?? 0;
-          const isCurrent = idx === selectedIndex;
-
-          const marker = isCurrent
-            ? `<span style="color:${SELECTED_COLOR};font-weight:700;letter-spacing:.03em">▸ 当前节点</span><br/>`
-            : '';
-
-          const countDetail = rawCount > 0
-            ? `<div style="margin-top:4px;display:flex;gap:8px">
-                <span style="color:${COLOR_CREATE}">+${createCount}</span>
-                <span style="color:${COLOR_UPDATE}">~${updateCount}</span>
-                <span style="color:${COLOR_DELETE}">-${deleteCount}</span>
-              </div>`
-            : '';
-
-          return `${marker}<span style="color:#687385;font-size:10px">${dateStr}</span><br/>
-            <span style="font-size:13px;font-weight:600;color:#e5eaf2">${rawCount}</span>
-            <span style="color:#687385"> 条变动</span>${countDetail}
-            ${idx !== undefined ? `<div style="margin-top:3px;color:#465061;font-size:9px">节点 #${idx + 1}</div>` : ''}`;
-        },
-        extraCssText:
-          'box-shadow:0 10px 28px rgba(0,0,0,0.35);border-radius:8px;padding:10px 14px;',
-      },
-      dataZoom: [
-        {
-          type: 'inside',
-          xAxisIndex: 0,
-        },
-      ],
-      series: [
-        {
-          type: 'bar',
-          data,
-          barMaxWidth: 9,
-          barMinWidth: 2,
-          markLine: {
-            silent: true,
-            symbol: ['none', 'none'],
-            data: markLineData,
-            animation: !prefersReducedMotion,
-            animationDuration: prefersReducedMotion ? 0 : 250,
-          },
-          markPoint: {
-            data: markPointData,
-            animation: !prefersReducedMotion,
-            animationDuration: prefersReducedMotion ? 0 : 250,
-          },
-        },
-      ],
-      animation: !prefersReducedMotion,
-      animationDuration: prefersReducedMotion ? 0 : 180,
-      animationEasing: 'cubicOut',
+          grid,
+        ),
+        label: formatTime(new Date(selection.timestampMs)),
+      });
     };
-  }, [timePoints, timelineStats, selectedIndex, prefersReducedMotion]);
+
+    updateOverlay();
+    echartsInstance.on('datazoom', updateOverlay);
+    echartsInstance.on('finished', updateOverlay);
+    return () => {
+      echartsInstance.off('datazoom', updateOverlay);
+      echartsInstance.off('finished', updateOverlay);
+    };
+  }, [echartsInstance, option, selectedIndex, timelineStats]);
 
   const onEvents = useMemo(
     () => ({
@@ -417,15 +316,87 @@ export const Timeline: React.FC<TimelineProps> = ({
       </div>
 
       {/* ── ECharts 图表 ── */}
-      <ReactECharts
-        option={option}
+      <div
         style={{
+          position: 'relative',
           height: chartHeight,
           transition: prefersReducedMotion ? 'none' : 'height 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
-        onEvents={onEvents}
-        notMerge
-      />
+      >
+        <ReactECharts
+          option={option}
+          style={{ height: '100%', width: '100%' }}
+          onEvents={onEvents}
+          onChartReady={setEchartsInstance}
+          notMerge
+        />
+        {selectionOverlay && (
+          <div
+            data-testid="timeline-selection-overlay"
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+              zIndex: 2,
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                left: selectionOverlay.geometry.barLeft,
+                top: selectionOverlay.geometry.barTop,
+                width: selectionOverlay.geometry.barWidth,
+                height: selectionOverlay.geometry.barHeight,
+                background: SELECTED_COLOR,
+                opacity: 0.95,
+                borderRadius: '3px 3px 0 0',
+                boxShadow: `0 0 5px ${SELECTED_GLOW}`,
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                left: selectionOverlay.geometry.lineLeft,
+                top: selectionOverlay.geometry.lineTop,
+                height: selectionOverlay.geometry.lineHeight,
+                borderLeft: `1.5px solid ${SELECTED_LINE}`,
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                left: selectionOverlay.geometry.lineLeft + 4,
+                top: selectionOverlay.geometry.lineTop + 2,
+                color: '#d7deec',
+                fontSize: 9,
+                fontFamily: "'JetBrains Mono', monospace",
+                background: 'rgba(27, 34, 48, 0.96)',
+                padding: '2px 6px',
+                borderRadius: 3,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {selectionOverlay.label}
+            </div>
+            <svg
+              width="10"
+              height="6"
+              viewBox="0 0 10 6"
+              style={{
+                position: 'absolute',
+                left: selectionOverlay.geometry.markerLeft,
+                top: selectionOverlay.geometry.markerTop,
+                overflow: 'visible',
+                filter: `drop-shadow(0 0 4px ${SELECTED_GLOW})`,
+              }}
+            >
+              <path d="M0 0H10L5 6Z" fill={SELECTED_COLOR} />
+            </svg>
+          </div>
+        )}
+      </div>
 
       {/* ── 底部控制栏 ── */}
       <div className="timeline-footer">
