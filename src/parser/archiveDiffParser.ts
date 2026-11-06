@@ -17,9 +17,9 @@ export function extractArchiveDiff(rawText: string): string | null {
 }
 
 function getChangeType(oldValue: string, newValue: string): ChangeType {
+  if (oldValue === newValue) return 'noop';
   if (oldValue === 'nil') return 'create';
   if (newValue === 'nil') return 'delete';
-  if (oldValue === newValue) return 'noop';
   return 'update';
 }
 
@@ -32,14 +32,24 @@ function getChangeType(oldValue: string, newValue: string): ChangeType {
  * The pipe inside this bracket is part of the metadata, not an archive_diff
  * entry delimiter. A plain `diffStr.split('|')` would incorrectly produce a
  * fake key such as `max:99999999]`.
+ *
+ * Serialized table/list values also contain pipes as field separators:
+ *   |4=>>>1||1||5||0||幽暗丛林||尸如潮水||||1||0||0||0
+ * A plain split would turn every field into a fake archive key, so `||` must
+ * stay inside its entry.
  */
 function splitArchiveDiffEntries(diffStr: string): string[] {
   const entries: string[] = [];
   let current = '';
   let bracketDepth = 0;
 
-  for (const char of diffStr) {
-    if (char === '|' && bracketDepth === 0) {
+  for (let i = 0; i < diffStr.length; i += 1) {
+    const char = diffStr[i];
+    const isEntrySeparator = char === '|'
+      && diffStr[i - 1] !== '|'
+      && diffStr[i + 1] !== '|';
+
+    if (isEntrySeparator && bracketDepth === 0) {
       if (current.length > 0) entries.push(current);
       current = '';
       continue;

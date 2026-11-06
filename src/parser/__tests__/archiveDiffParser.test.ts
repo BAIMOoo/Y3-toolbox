@@ -58,6 +58,33 @@ describe('parseArchiveDiff', () => {
     const changes = parseArchiveDiff('|90-81=12544>>>12544');
     expect(changes[0].changeType).toBe('noop');
   });
+
+  it('should keep double-pipe table values inside a single entry', () => {
+    const changes = parseArchiveDiff(
+      '|8=>>>shop=134284002,134284003|1=1||1||5||0||幽暗丛林||尸如潮水||||1||0||0||0>>>1||1||4||0||幽暗丛林||绝境求生||||1||0||0||0|4=>>>1||1||4||0||幽暗丛林||绝境求生||||1||0||0||0',
+    );
+
+    expect(changes.map((change) => change.key)).toEqual(['8', '1', '4']);
+    expect(changes[1].oldValue).toBe('1||1||5||0||幽暗丛林||尸如潮水||||1||0||0||0');
+    expect(changes[1].newValue).toBe('1||1||4||0||幽暗丛林||绝境求生||||1||0||0||0');
+    expect(changes[1].changeType).toBe('update');
+    expect(changes[2].oldValue).toBe('');
+    expect(changes[2].newValue).toBe('1||1||4||0||幽暗丛林||绝境求生||||1||0||0||0');
+  });
+
+  it('should treat nil>>nil as noop', () => {
+    const [change] = parseArchiveDiff('|6-_next_uid=nil>>nil>>>3>>0|6-idle_relic_enabled=True>>True>>>1>>1');
+
+    expect(change).toEqual({
+      key: '6-_next_uid',
+      keyParts: ['6', '_next_uid'],
+      rootKey: '6',
+      oldValue: 'nil',
+      newValue: 'nil',
+      changeType: 'noop',
+    });
+  });
+
   it('should handle empty diff string', () => {
     expect(parseArchiveDiff('')).toEqual([]);
   });
